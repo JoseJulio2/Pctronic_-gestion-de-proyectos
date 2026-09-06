@@ -15,9 +15,11 @@
 </script>
 <link rel="stylesheet" href="assets/css/styles.css" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="assets/js/config.js"></script>
 <script src="assets/js/supabaseClient.js"></script>
 <script src="assets/js/util.js"></script>
+<script src="assets/js/excel.js"></script>
 </head>
 <body data-page="proyectos" data-title="Detalle del Proyecto" class="font-display bg-gray-50 text-gray-900 antialiased">
 
@@ -40,6 +42,7 @@
       <nav class="-mb-px flex gap-6 overflow-x-auto text-sm font-medium" id="tabs-nav">
         <button data-tab="resumen" class="tab-btn whitespace-nowrap border-b-2 px-1 py-3">Resumen</button>
         <button data-tab="presupuesto" class="tab-btn whitespace-nowrap border-b-2 px-1 py-3">Presupuesto</button>
+        <button data-tab="ejecucion" class="tab-btn whitespace-nowrap border-b-2 px-1 py-3">Ejecución</button>
         <button data-tab="facturacion" class="tab-btn whitespace-nowrap border-b-2 px-1 py-3">Facturación</button>
         <button data-tab="compras" class="tab-btn whitespace-nowrap border-b-2 px-1 py-3">Compras</button>
         <button data-tab="contratistas" class="tab-btn whitespace-nowrap border-b-2 px-1 py-3">Contratistas</button>
@@ -63,14 +66,22 @@
 
     <!-- PRESUPUESTO -->
     <section data-tab-panel="presupuesto" class="hidden space-y-4">
-      <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-5" id="presu-kpis">
         <div class="rounded-xl border border-gray-200 bg-white p-4">
-          <p class="text-xs font-medium text-gray-500">Total Materiales (MP)</p>
+          <p class="text-xs font-medium text-gray-500">Mano de Obra (MO)</p>
+          <p class="text-lg font-bold" id="presu-total-mo">$ 0</p>
+        </div>
+        <div class="rounded-xl border border-gray-200 bg-white p-4">
+          <p class="text-xs font-medium text-gray-500">Materiales (MP)</p>
           <p class="text-lg font-bold" id="presu-total-mp">$ 0</p>
         </div>
         <div class="rounded-xl border border-gray-200 bg-white p-4">
-          <p class="text-xs font-medium text-gray-500">Total Mano de Obra (MO)</p>
-          <p class="text-lg font-bold" id="presu-total-mo">$ 0</p>
+          <p class="text-xs font-medium text-gray-500">Equipos</p>
+          <p class="text-lg font-bold" id="presu-total-equipo">$ 0</p>
+        </div>
+        <div class="rounded-xl border border-gray-200 bg-white p-4">
+          <p class="text-xs font-medium text-gray-500">Alquileres</p>
+          <p class="text-lg font-bold" id="presu-total-alquiler">$ 0</p>
         </div>
         <div class="rounded-xl border border-primary/30 bg-blue-50 p-4">
           <p class="text-xs font-medium text-primary">Costo Total Estimado</p>
@@ -78,29 +89,55 @@
         </div>
       </div>
 
+      <div class="flex flex-wrap items-center justify-end gap-2">
+        <button type="button" id="btn-plantilla-presupuesto" class="flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">
+          <span class="material-symbols-outlined text-[16px]">download</span> Descargar plantilla Excel
+        </button>
+        <label class="flex cursor-pointer items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">
+          <span class="material-symbols-outlined text-[16px]">upload</span> Importar Excel
+          <input type="file" id="input-importar-presupuesto" accept=".xlsx,.xls" class="hidden" />
+        </label>
+      </div>
+
       <form id="form-presupuesto-item" class="grid grid-cols-1 gap-3 rounded-xl border border-gray-200 bg-white p-4 sm:grid-cols-12 sm:items-end">
         <div class="sm:col-span-2">
-          <label class="mb-1 block text-xs font-medium text-gray-700">Tipo</label>
+          <label class="mb-1 block text-xs font-medium text-gray-700">Categoría</label>
           <select id="item-tipo" class="w-full rounded-lg border-gray-300 text-sm">
-            <option value="MP">Materiales</option>
             <option value="MO">Mano de Obra</option>
+            <option value="MP">Materiales</option>
+            <option value="EQUIPO">Equipos</option>
+            <option value="ALQUILER">Alquileres</option>
             <option value="OTRO">Otro</option>
           </select>
         </div>
-        <div class="sm:col-span-4">
+        <div class="sm:col-span-3">
           <label class="mb-1 block text-xs font-medium text-gray-700">Descripción</label>
           <input id="item-descripcion" required class="w-full rounded-lg border-gray-300 text-sm" />
         </div>
-        <div class="sm:col-span-2">
-          <label class="mb-1 block text-xs font-medium text-gray-700">Cantidad</label>
+        <div class="sm:col-span-1">
+          <label class="mb-1 block text-xs font-medium text-gray-700">Unidad</label>
+          <input id="item-unidad" placeholder="un, m, hr..." class="w-full rounded-lg border-gray-300 text-sm" />
+        </div>
+        <div class="sm:col-span-1">
+          <label class="mb-1 block text-xs font-medium text-gray-700">Cant.</label>
           <input id="item-cantidad" type="number" min="0" step="0.01" value="1" class="w-full rounded-lg border-gray-300 text-sm" />
         </div>
         <div class="sm:col-span-2">
           <label class="mb-1 block text-xs font-medium text-gray-700">Vlr. Unitario</label>
-          <input id="item-valor" type="number" min="0" step="100" value="0" class="w-full rounded-lg border-gray-300 text-sm" />
+          <input id="item-valor" class="input-moneda w-full rounded-lg border-gray-300 text-sm" inputmode="numeric" value="0" />
         </div>
         <div class="sm:col-span-2">
-          <button class="w-full rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">+ Añadir Renglón</button>
+          <label class="mb-1 block text-xs font-medium text-gray-700">Contratista</label>
+          <select id="item-contratista" class="w-full rounded-lg border-gray-300 text-sm">
+            <option value="">— Ninguno —</option>
+          </select>
+        </div>
+        <div class="flex items-center gap-1 sm:col-span-1">
+          <input type="checkbox" id="item-adicional" class="rounded border-gray-300 text-primary focus:ring-primary" />
+          <label for="item-adicional" class="text-xs font-medium text-gray-700">Adicional</label>
+        </div>
+        <div class="sm:col-span-12">
+          <button class="w-full rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 sm:w-auto">+ Añadir Renglón</button>
         </div>
       </form>
 
@@ -108,17 +145,30 @@
         <table class="w-full text-left text-sm">
           <thead class="bg-gray-50 text-xs uppercase text-gray-500">
             <tr>
-              <th class="px-4 py-3">Tipo</th>
+              <th class="px-4 py-3">Categoría</th>
               <th class="px-4 py-3">Descripción</th>
+              <th class="px-4 py-3">Unidad</th>
               <th class="px-4 py-3">Cant.</th>
               <th class="px-4 py-3">Vlr. Unitario</th>
               <th class="px-4 py-3">Vlr. Total</th>
+              <th class="px-4 py-3">Contratista</th>
               <th class="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody id="tabla-presupuesto"></tbody>
         </table>
       </div>
+    </section>
+
+    <!-- EJECUCIÓN -->
+    <section data-tab-panel="ejecucion" class="hidden space-y-4">
+      <div class="flex items-center justify-between">
+        <p class="text-sm text-gray-500">Registra por corte lo realmente avanzado/instalado. Esas cantidades alimentan a la vez la factura al cliente y el pago al contratista.</p>
+        <button id="btn-nuevo-corte" class="flex shrink-0 items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+          <span class="material-symbols-outlined text-[18px]">add</span> Nuevo Corte
+        </button>
+      </div>
+      <div id="lista-cortes" class="space-y-3"></div>
     </section>
 
     <!-- FACTURACIÓN -->
@@ -145,7 +195,7 @@
         </div>
         <div class="sm:col-span-2">
           <label class="mb-1 block text-xs font-medium text-gray-700">Valor</label>
-          <input id="factura-valor" type="number" min="0" step="1000" class="w-full rounded-lg border-gray-300 text-sm" />
+          <input id="factura-valor" class="input-moneda w-full rounded-lg border-gray-300 text-sm" inputmode="numeric" />
         </div>
         <div class="sm:col-span-2">
           <label class="mb-1 block text-xs font-medium text-gray-700">Emisión</label>
@@ -205,6 +255,7 @@
           <select id="compra-categoria" class="w-full rounded-lg border-gray-300 text-sm">
             <option value="materiales">Materiales</option>
             <option value="mano_obra">Mano de Obra</option>
+            <option value="equipos">Equipos</option>
             <option value="otros">Otros</option>
           </select>
         </div>
@@ -212,9 +263,13 @@
           <label class="mb-1 block text-xs font-medium text-gray-700">Descripción</label>
           <input id="compra-descripcion" required class="w-full rounded-lg border-gray-300 text-sm" />
         </div>
-        <div class="sm:col-span-2">
-          <label class="mb-1 block text-xs font-medium text-gray-700">Valor</label>
-          <input id="compra-valor" type="number" min="0" step="100" class="w-full rounded-lg border-gray-300 text-sm" />
+        <div class="sm:col-span-1">
+          <label class="mb-1 block text-xs font-medium text-gray-700">Vlr. antes IVA</label>
+          <input id="compra-valor" class="input-moneda w-full rounded-lg border-gray-300 text-sm" inputmode="numeric" />
+        </div>
+        <div class="sm:col-span-1">
+          <label class="mb-1 block text-xs font-medium text-gray-700">IVA %</label>
+          <input id="compra-iva" type="number" min="0" step="0.5" value="19" class="w-full rounded-lg border-gray-300 text-sm" />
         </div>
         <div class="sm:col-span-1">
           <label class="mb-1 block text-xs font-medium text-gray-700">Fecha</label>
@@ -251,7 +306,7 @@
         </div>
         <div class="sm:col-span-3">
           <label class="mb-1 block text-xs font-medium text-gray-700">Valor Contratado</label>
-          <input id="contratista-valor" type="number" min="0" step="1000" class="w-full rounded-lg border-gray-300 text-sm" />
+          <input id="contratista-valor" class="input-moneda w-full rounded-lg border-gray-300 text-sm" inputmode="numeric" />
         </div>
         <div class="sm:col-span-3">
           <button class="w-full rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">+ Vincular</button>

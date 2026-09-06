@@ -15,9 +15,11 @@
 </script>
 <link rel="stylesheet" href="assets/css/styles.css" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="assets/js/config.js"></script>
 <script src="assets/js/supabaseClient.js"></script>
 <script src="assets/js/util.js"></script>
+<script src="assets/js/excel.js"></script>
 </head>
 <body data-page="proveedores" data-title="Proveedores" class="font-display bg-gray-50 text-gray-900 antialiased">
 
@@ -29,24 +31,25 @@
     <div class="flex flex-wrap items-center justify-between gap-3">
       <input id="filtro-busqueda" type="search" placeholder="Buscar proveedores..."
         class="w-72 rounded-lg border-gray-300 text-sm shadow-sm focus:border-primary focus:ring-primary" />
+      <button id="btn-exportar" class="flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"><span class="material-symbols-outlined text-[18px]">download</span> Exportar Excel</button>
       <button id="btn-nuevo" class="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
         <span class="material-symbols-outlined text-[18px]">add</span> Nuevo Proveedor
       </button>
     </div>
+    <p class="text-xs text-gray-400">Haz clic en una fila para ver y administrar sus contactos (comercial, despacho, cartera, garantías).</p>
 
     <div class="overflow-x-auto rounded-xl border border-gray-200 bg-white">
       <table class="w-full text-left text-sm">
         <thead class="bg-gray-50 text-xs uppercase text-gray-500">
           <tr>
             <th class="px-4 py-3">Nombre</th>
+            <th class="px-4 py-3">NIT</th>
             <th class="px-4 py-3">Categoría</th>
-            <th class="px-4 py-3">Teléfono</th>
-            <th class="px-4 py-3">Correo</th>
             <th class="px-4 py-3"></th>
           </tr>
         </thead>
         <tbody id="tabla-catalogo">
-          <tr><td class="px-4 py-6 text-gray-400" colspan="5">Cargando…</td></tr>
+          <tr><td class="px-4 py-6 text-gray-400" colspan="4">Cargando…</td></tr>
         </tbody>
       </table>
     </div>
@@ -69,11 +72,12 @@
   window.CATALOGO_CONFIG = {
     tabla: "proveedores",
     titulo: "Proveedores",
+    detalleUrl: (fila) => `proveedor-detalle.html?id=${fila.id}`,
     campos: [
       { key: "nombre", label: "Nombre", tipo: "text", requerido: true },
+      { key: "nit", label: "NIT", tipo: "text" },
       { key: "categoria", label: "Categoría", tipo: "text" },
-      { key: "contacto_telefono", label: "Teléfono", tipo: "tel" },
-      { key: "contacto_email", label: "Correo", tipo: "email" },
+      { key: "notas", label: "Notas", tipo: "text", enTabla: false },
     ],
   };
 </script>

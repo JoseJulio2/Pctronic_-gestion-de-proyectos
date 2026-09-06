@@ -30,9 +30,19 @@
       Vista global de todas las compras y costos de todos los proyectos. Para registrar una compra nueva, entra al proyecto correspondiente → pestaña "Compras".
     </p>
 
-    <div class="rounded-xl border border-gray-200 bg-white p-4 sm:w-72">
-      <p class="text-xs font-medium text-gray-500">Total Comprado (filtro actual)</p>
-      <p class="text-lg font-bold" id="kpi-total">$ 0</p>
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div class="rounded-xl border border-gray-200 bg-white p-4">
+        <p class="text-xs font-medium text-gray-500">Total Comprado (filtro actual)</p>
+        <p class="text-lg font-bold" id="kpi-total">$ 0</p>
+      </div>
+      <div class="rounded-xl border border-gray-200 bg-white p-4">
+        <p class="text-xs font-medium text-gray-500" id="kpi-mes-label">Total Comprado Este Mes</p>
+        <p class="text-lg font-bold text-primary" id="kpi-mes">$ 0</p>
+      </div>
+      <div class="rounded-xl border border-gray-200 bg-white p-4">
+        <p class="text-xs font-medium text-gray-500" id="kpi-anio-label">Total Comprado Este Año</p>
+        <p class="text-lg font-bold text-primary" id="kpi-anio">$ 0</p>
+      </div>
     </div>
 
     <div class="flex flex-wrap items-center gap-3">
@@ -42,6 +52,7 @@
         <option value="">Categoría: Todas</option>
         <option value="materiales">Materiales</option>
         <option value="mano_obra">Mano de Obra</option>
+        <option value="equipos">Equipos</option>
         <option value="otros">Otros</option>
       </select>
     </div>

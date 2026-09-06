@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { page: "clientes", href: "clientes.html", icon: "groups", label: "Clientes" },
   { page: "contratistas", href: "contratistas.html", icon: "engineering", label: "Contratistas" },
   { page: "proveedores", href: "proveedores.html", icon: "local_shipping", label: "Proveedores" },
+  { page: "empresas", href: "empresas.html", icon: "domain", label: "Empresas" },
 ];
 
 const NAV_ITEMS_ADMIN = [
@@ -68,15 +69,15 @@ function renderTopbar(titulo) {
   return `
   <header class="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-gray-200 bg-white px-6">
     <h1 class="text-lg font-bold text-gray-900">${escapeHtml(titulo || "")}</h1>
-    <div class="flex items-center gap-3">
+    <a href="perfil.html" class="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-gray-50" title="Mi perfil">
       <div class="text-right leading-tight hidden sm:block">
         <p id="topbar-nombre" class="text-sm font-semibold text-gray-800">—</p>
         <p id="topbar-rol" class="text-xs text-gray-500">—</p>
       </div>
-      <div class="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-sm" id="topbar-avatar">
+      <div class="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-primary/10 text-primary font-bold text-sm bg-cover bg-center" id="topbar-avatar">
         ?
       </div>
-    </div>
+    </a>
   </header>`;
 }
 
@@ -107,7 +108,7 @@ async function inicializarApp() {
   try {
     const { data, error } = await window.sb
       .from("profiles")
-      .select("nombre_completo, rol")
+      .select("nombre_completo, rol, cargo, telefono, avatar_url")
       .eq("id", session.user.id)
       .single();
     if (!error) profile = data;
@@ -123,7 +124,15 @@ async function inicializarApp() {
   const avatarEl = document.getElementById("topbar-avatar");
   if (nombreEl) nombreEl.textContent = nombre;
   if (rolEl) rolEl.textContent = rol;
-  if (avatarEl) avatarEl.textContent = (nombre || "?").trim().charAt(0).toUpperCase();
+  if (avatarEl) {
+    if (profile?.avatar_url) {
+      avatarEl.textContent = "";
+      avatarEl.style.backgroundImage = `url('${profile.avatar_url}')`;
+    } else {
+      avatarEl.style.backgroundImage = "";
+      avatarEl.textContent = (nombre || "?").trim().charAt(0).toUpperCase();
+    }
+  }
 
   if (profile?.rol === "admin") {
     const slot = document.getElementById("nav-admin-slot");

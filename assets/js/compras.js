@@ -2,7 +2,12 @@
   await window.pctronicReady;
 
   let cache = [];
-  const etiquetaCat = { materiales: "Materiales", mano_obra: "Mano de Obra", otros: "Otros" };
+  const etiquetaCat = { materiales: "Materiales", mano_obra: "Mano de Obra", equipos: "Equipos", otros: "Otros" };
+
+  const ahora = new Date();
+  document.getElementById("kpi-mes-label").textContent =
+    `Total Comprado ${ahora.toLocaleDateString("es-CO", { month: "long" })}`;
+  document.getElementById("kpi-anio-label").textContent = `Total Comprado ${ahora.getFullYear()}`;
 
   async function cargar() {
     const { data, error } = await window.sb
@@ -30,6 +35,20 @@
     document.getElementById("kpi-total").textContent = formatoMoneda(
       filtradas.reduce((a, c) => a + Number(c.valor), 0)
     );
+
+    const mesActual = ahora.getMonth();
+    const anioActual = ahora.getFullYear();
+    const totalMes = cache
+      .filter((c) => {
+        const f = new Date(c.fecha + "T00:00:00");
+        return f.getMonth() === mesActual && f.getFullYear() === anioActual;
+      })
+      .reduce((a, c) => a + Number(c.valor), 0);
+    const totalAnio = cache
+      .filter((c) => new Date(c.fecha + "T00:00:00").getFullYear() === anioActual)
+      .reduce((a, c) => a + Number(c.valor), 0);
+    document.getElementById("kpi-mes").textContent = formatoMoneda(totalMes);
+    document.getElementById("kpi-anio").textContent = formatoMoneda(totalAnio);
 
     const tbody = document.getElementById("tabla-compras");
     tbody.innerHTML = filtradas.length

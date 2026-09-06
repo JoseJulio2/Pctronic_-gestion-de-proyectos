@@ -39,9 +39,9 @@
     tbody.innerHTML = filtrados
       .map(
         (p) => `
-      <tr class="border-b border-gray-50 last:border-0 hover:bg-gray-50">
+      <tr class="cursor-pointer border-b border-gray-50 last:border-0 hover:bg-gray-50" data-id="${p.id}">
         <td class="px-5 py-3">
-          <a href="proyecto-detalle.html?id=${p.id}" class="font-medium text-gray-900 hover:text-primary">${escapeHtml(p.nombre)}</a>
+          <span class="font-medium text-gray-900">${escapeHtml(p.nombre)}</span>
           <p class="text-xs text-gray-500">${escapeHtml(p.clientes?.nombre || "Sin cliente asignado")}</p>
         </td>
         <td class="px-5 py-3">${badgeHtml(ESTADOS_PROYECTO, p.estado)}</td>
@@ -54,11 +54,17 @@
         <td class="px-5 py-3 font-medium">${formatoMoneda(p.valor_total)}</td>
         <td class="px-5 py-3 text-gray-500">${formatoFecha(p.fecha_fin_estimada)}</td>
         <td class="px-5 py-3 text-right">
-          <a href="proyecto-detalle.html?id=${p.id}" class="text-sm font-semibold text-primary hover:underline">Ver →</a>
+          <span class="text-sm font-semibold text-primary">Ver →</span>
         </td>
       </tr>`
       )
       .join("");
+
+    tbody.querySelectorAll("tr[data-id]").forEach((tr) =>
+      tr.addEventListener("click", () => {
+        window.location.href = `proyecto-detalle.html?id=${tr.dataset.id}`;
+      })
+    );
   }
 
   document.getElementById("filtro-busqueda").addEventListener("input", render);

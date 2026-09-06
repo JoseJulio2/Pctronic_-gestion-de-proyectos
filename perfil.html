@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mi Perfil · Pctronic</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+<script>
+  tailwind.config = {
+    theme: { extend: { colors: { primary: "#135bec" }, fontFamily: { display: ["Inter", "sans-serif"] } } },
+  };
+</script>
+<link rel="stylesheet" href="assets/css/styles.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="assets/js/config.js"></script>
+<script src="assets/js/supabaseClient.js"></script>
+<script src="assets/js/util.js"></script>
+</head>
+<body data-page="" data-title="Mi Perfil" class="font-display bg-gray-50 text-gray-900 antialiased">
+
+<div id="app-sidebar"></div>
+<div class="lg:pl-64">
+  <div id="app-topbar"></div>
+
+  <main class="mx-auto max-w-2xl space-y-6 p-6">
+
+    <section class="rounded-xl border border-gray-200 bg-white p-6">
+      <h2 class="mb-4 text-base font-bold text-gray-900">Foto de perfil</h2>
+      <div class="flex items-center gap-5">
+        <div id="perfil-avatar-preview"
+          class="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/10 bg-cover bg-center text-2xl font-bold text-primary">
+          ?
+        </div>
+        <div>
+          <label class="flex w-fit cursor-pointer items-center gap-2 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+            <span class="material-symbols-outlined text-[18px]">upload</span> Cambiar foto
+            <input type="file" id="input-avatar" accept="image/*" class="hidden" />
+          </label>
+          <p class="mt-1 text-xs text-gray-400">Formatos JPG o PNG. Se sube automáticamente al seleccionarla.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="rounded-xl border border-gray-200 bg-white p-6">
+      <h2 class="mb-4 text-base font-bold text-gray-900">Información personal</h2>
+      <div class="space-y-3">
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Nombre completo</label>
+          <input id="perfil-nombre" class="block w-full rounded-lg border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm" />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Cargo</label>
+          <input id="perfil-cargo" class="block w-full rounded-lg border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm" />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Teléfono</label>
+          <input id="perfil-telefono" type="tel" class="block w-full rounded-lg border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm" />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Correo electrónico</label>
+          <input id="perfil-email" disabled class="block w-full rounded-lg border-gray-200 bg-gray-50 text-gray-500 shadow-sm sm:text-sm" />
+        </div>
+      </div>
+      <div class="mt-5 flex justify-end">
+        <button id="btn-guardar-perfil" class="rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700">Guardar cambios</button>
+      </div>
+    </section>
+
+    <section class="rounded-xl border border-gray-200 bg-white p-6">
+      <h2 class="mb-4 text-base font-bold text-gray-900">Cambiar contraseña</h2>
+      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Nueva contraseña</label>
+          <input id="perfil-password" type="password" autocomplete="new-password"
+            class="block w-full rounded-lg border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm" />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium text-gray-700">Confirmar contraseña</label>
+          <input id="perfil-password-confirm" type="password" autocomplete="new-password"
+            class="block w-full rounded-lg border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm" />
+        </div>
+      </div>
+      <div class="mt-5 flex justify-end">
+        <button id="btn-cambiar-password" class="rounded-lg border border-gray-300 px-5 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50">Actualizar contraseña</button>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="assets/js/layout.js"></script>
+<script src="assets/js/perfil.js"></script>
+</body>
+</html>

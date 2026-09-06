@@ -15,9 +15,11 @@
 </script>
 <link rel="stylesheet" href="assets/css/styles.css" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="assets/js/config.js"></script>
 <script src="assets/js/supabaseClient.js"></script>
 <script src="assets/js/util.js"></script>
+<script src="assets/js/excel.js"></script>
 </head>
 <body data-page="contratistas" data-title="Contratistas" class="font-display bg-gray-50 text-gray-900 antialiased">
 
@@ -29,6 +31,7 @@
     <div class="flex flex-wrap items-center justify-between gap-3">
       <input id="filtro-busqueda" type="search" placeholder="Buscar contratistas..."
         class="w-72 rounded-lg border-gray-300 text-sm shadow-sm focus:border-primary focus:ring-primary" />
+      <button id="btn-exportar" class="flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"><span class="material-symbols-outlined text-[18px]">download</span> Exportar Excel</button>
       <button id="btn-nuevo" class="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
         <span class="material-symbols-outlined text-[18px]">add</span> Nuevo Contratista
       </button>
@@ -39,14 +42,15 @@
         <thead class="bg-gray-50 text-xs uppercase text-gray-500">
           <tr>
             <th class="px-4 py-3">Nombre</th>
+            <th class="px-4 py-3">Tipo</th>
+            <th class="px-4 py-3">Retención</th>
             <th class="px-4 py-3">Especialidad</th>
             <th class="px-4 py-3">Teléfono</th>
-            <th class="px-4 py-3">Correo</th>
             <th class="px-4 py-3"></th>
           </tr>
         </thead>
         <tbody id="tabla-catalogo">
-          <tr><td class="px-4 py-6 text-gray-400" colspan="5">Cargando…</td></tr>
+          <tr><td class="px-4 py-6 text-gray-400" colspan="6">Cargando…</td></tr>
         </tbody>
       </table>
     </div>
@@ -71,9 +75,28 @@
     titulo: "Contratistas",
     campos: [
       { key: "nombre", label: "Nombre / Cuadrilla", tipo: "text", requerido: true },
+      {
+        key: "tipo_persona",
+        label: "Tipo",
+        tipo: "select",
+        requerido: true,
+        opciones: [
+          { value: "empresa", label: "Empresa" },
+          { value: "persona_natural", label: "Persona Natural" },
+        ],
+      },
+      {
+        key: "es_declarante_renta",
+        label: "¿Declarante de renta?",
+        tipo: "boolean",
+        showIf: { key: "tipo_persona", value: "persona_natural" },
+        enTabla: false,
+      },
+      { key: "porcentaje_retencion", label: "Retención", tipo: "porcentaje", calculado: true },
+      { key: "identificacion", label: "Identificación / NIT", tipo: "text", enTabla: false },
       { key: "especialidad", label: "Especialidad", tipo: "text" },
       { key: "telefono", label: "Teléfono", tipo: "tel" },
-      { key: "email", label: "Correo", tipo: "email" },
+      { key: "email", label: "Correo", tipo: "email", enTabla: false },
     ],
   };
 </script>

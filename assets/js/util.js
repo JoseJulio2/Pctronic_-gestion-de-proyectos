@@ -79,3 +79,38 @@ function manejarError(error, contexto) {
 function qs(name) {
   return new URLSearchParams(window.location.search).get(name);
 }
+
+// ============================================================================
+// Campos de dinero con separador de miles (ej. "1.250.000") pero que
+// devuelven un número plano. Uso:
+//   <input class="input-moneda" inputmode="numeric" />
+//   activarCamposMoneda(); // una vez, después de insertar el HTML
+//   valorMoneda(inputEl);  // para leer el número actual
+// ============================================================================
+
+function formatearMiles(valorNumerico) {
+  const n = Number(valorNumerico || 0);
+  return n.toLocaleString("es-CO", { maximumFractionDigits: 0 });
+}
+
+function valorMoneda(inputEl) {
+  if (!inputEl) return 0;
+  const soloDigitos = String(inputEl.value || "").replace(/[^\d]/g, "");
+  return soloDigitos ? Number(soloDigitos) : 0;
+}
+
+function establecerValorMoneda(inputEl, valorNumerico) {
+  if (!inputEl) return;
+  inputEl.value = valorNumerico ? formatearMiles(valorNumerico) : "";
+}
+
+function activarCamposMoneda(selector = ".input-moneda", contenedor = document) {
+  contenedor.querySelectorAll(selector).forEach((input) => {
+    if (input.dataset.moneyBound) return;
+    input.dataset.moneyBound = "1";
+    input.addEventListener("input", () => {
+      const num = valorMoneda(input);
+      input.value = num ? formatearMiles(num) : "";
+    });
+  });
+}
