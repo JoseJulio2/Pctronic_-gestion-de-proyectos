@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Detalle del Proyecto · Pctronic</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+<script>
+  tailwind.config = {
+    theme: { extend: { colors: { primary: "#135bec" }, fontFamily: { display: ["Inter", "sans-serif"] } } },
+  };
+</script>
+<link rel="stylesheet" href="assets/css/styles.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="assets/js/config.js"></script>
+<script src="assets/js/supabaseClient.js"></script>
+<script src="assets/js/util.js"></script>
+</head>
+<body data-page="proyectos" data-title="Detalle del Proyecto" class="font-display bg-gray-50 text-gray-900 antialiased">
+
+<div id="app-sidebar"></div>
+<div class="lg:pl-64">
+  <div id="app-topbar"></div>
+
+  <main class="p-6 space-y-5">
+    <a href="proyectos.html" class="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800">
+      <span class="material-symbols-outlined text-[18px]">arrow_back</span> Volver a Proyectos
+    </a>
+
+    <!-- Encabezado del proyecto -->
+    <div class="rounded-xl border border-gray-200 bg-white p-5" id="encabezado-proyecto">
+      <div class="skeleton h-8 w-1/3 rounded"></div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="border-b border-gray-200">
+      <nav class="-mb-px flex gap-6 overflow-x-auto text-sm font-medium" id="tabs-nav">
+        <button data-tab="resumen" class="tab-btn whitespace-nowrap border-b-2 px-1 py-3">Resumen</button>
+        <button data-tab="presupuesto" class="tab-btn whitespace-nowrap border-b-2 px-1 py-3">Presupuesto</button>
+        <button data-tab="facturacion" class="tab-btn whitespace-nowrap border-b-2 px-1 py-3">Facturación</button>
+        <button data-tab="compras" class="tab-btn whitespace-nowrap border-b-2 px-1 py-3">Compras</button>
+        <button data-tab="contratistas" class="tab-btn whitespace-nowrap border-b-2 px-1 py-3">Contratistas</button>
+      </nav>
+    </div>
+
+    <!-- RESUMEN -->
+    <section data-tab-panel="resumen" class="space-y-4">
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4" id="resumen-kpis"></div>
+      <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div class="rounded-xl border border-gray-200 bg-white p-5">
+          <h3 class="mb-3 font-bold text-gray-900">Información General</h3>
+          <dl class="space-y-2 text-sm" id="resumen-info"></dl>
+        </div>
+        <div class="rounded-xl border border-gray-200 bg-white p-5">
+          <h3 class="mb-3 font-bold text-gray-900">Notas</h3>
+          <p class="text-sm text-gray-600" id="resumen-notas">—</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- PRESUPUESTO -->
+    <section data-tab-panel="presupuesto" class="hidden space-y-4">
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div class="rounded-xl border border-gray-200 bg-white p-4">
+          <p class="text-xs font-medium text-gray-500">Total Materiales (MP)</p>
+          <p class="text-lg font-bold" id="presu-total-mp">$ 0</p>
+        </div>
+        <div class="rounded-xl border border-gray-200 bg-white p-4">
+          <p class="text-xs font-medium text-gray-500">Total Mano de Obra (MO)</p>
+          <p class="text-lg font-bold" id="presu-total-mo">$ 0</p>
+        </div>
+        <div class="rounded-xl border border-primary/30 bg-blue-50 p-4">
+          <p class="text-xs font-medium text-primary">Costo Total Estimado</p>
+          <p class="text-lg font-bold text-primary" id="presu-total-general">$ 0</p>
+        </div>
+      </div>
+
+      <form id="form-presupuesto-item" class="grid grid-cols-1 gap-3 rounded-xl border border-gray-200 bg-white p-4 sm:grid-cols-12 sm:items-end">
+        <div class="sm:col-span-2">
+          <label class="mb-1 block text-xs font-medium text-gray-700">Tipo</label>
+          <select id="item-tipo" class="w-full rounded-lg border-gray-300 text-sm">
+            <option value="MP">Materiales</option>
+            <option value="MO">Mano de Obra</option>
+            <option value="OTRO">Otro</option>
+          </select>
+        </div>
+        <div class="sm:col-span-4">
+          <label class="mb-1 block text-xs font-medium text-gray-700">Descripción</label>
+          <input id="item-descripcion" required class="w-full rounded-lg border-gray-300 text-sm" />
+        </div>
+        <div class="sm:col-span-2">
+          <label class="mb-1 block text-xs font-medium text-gray-700">Cantidad</label>
+          <input id="item-cantidad" type="number" min="0" step="0.01" value="1" class="w-full rounded-lg border-gray-300 text-sm" />
+        </div>
+        <div class="sm:col-span-2">
+          <label class="mb-1 block text-xs font-medium text-gray-700">Vlr. Unitario</label>
+          <input id="item-valor" type="number" min="0" step="100" value="0" class="w-full rounded-lg border-gray-300 text-sm" />
+        </div>
+        <div class="sm:col-span-2">
+          <button class="w-full rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">+ Añadir Renglón</button>
+        </div>
+      </form>
+
+      <div class="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+        <table class="w-full text-left text-sm">
+          <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+            <tr>
+              <th class="px-4 py-3">Tipo</th>
+              <th class="px-4 py-3">Descripción</th>
+              <th class="px-4 py-3">Cant.</th>
+              <th class="px-4 py-3">Vlr. Unitario</th>
+              <th class="px-4 py-3">Vlr. Total</th>
+              <th class="px-4 py-3"></th>
+            </tr>
+          </thead>
+          <tbody id="tabla-presupuesto"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- FACTURACIÓN -->
+    <section data-tab-panel="facturacion" class="hidden space-y-4">
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div class="rounded-xl border border-gray-200 bg-white p-4">
+          <p class="text-xs font-medium text-gray-500">Total Facturado</p>
+          <p class="text-lg font-bold" id="fact-total">$ 0</p>
+        </div>
+        <div class="rounded-xl border border-gray-200 bg-white p-4">
+          <p class="text-xs font-medium text-gray-500">Total Pagado</p>
+          <p class="text-lg font-bold text-green-600" id="fact-pagado">$ 0</p>
+        </div>
+        <div class="rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <p class="text-xs font-medium text-amber-700">Pendiente por Cobrar</p>
+          <p class="text-lg font-bold text-amber-700" id="fact-pendiente">$ 0</p>
+        </div>
+      </div>
+
+      <form id="form-factura" class="grid grid-cols-1 gap-3 rounded-xl border border-gray-200 bg-white p-4 sm:grid-cols-12 sm:items-end">
+        <div class="sm:col-span-2">
+          <label class="mb-1 block text-xs font-medium text-gray-700">N° Factura</label>
+          <input id="factura-numero" class="w-full rounded-lg border-gray-300 text-sm" />
+        </div>
+        <div class="sm:col-span-2">
+          <label class="mb-1 block text-xs font-medium text-gray-700">Valor</label>
+          <input id="factura-valor" type="number" min="0" step="1000" class="w-full rounded-lg border-gray-300 text-sm" />
+        </div>
+        <div class="sm:col-span-2">
+          <label class="mb-1 block text-xs font-medium text-gray-700">Emisión</label>
+          <input id="factura-emision" type="date" class="w-full rounded-lg border-gray-300 text-sm" />
+        </div>
+        <div class="sm:col-span-2">
+          <label class="mb-1 block text-xs font-medium text-gray-700">Vencimiento</label>
+          <input id="factura-vencimiento" type="date" class="w-full rounded-lg border-gray-300 text-sm" />
+        </div>
+        <div class="sm:col-span-2">
+          <label class="mb-1 block text-xs font-medium text-gray-700">Estado</label>
+          <select id="factura-estado" class="w-full rounded-lg border-gray-300 text-sm">
+            <option value="pendiente">Pendiente</option>
+            <option value="pagada">Pagada</option>
+            <option value="vencida">Vencida</option>
+            <option value="anulada">Anulada</option>
+          </select>
+        </div>
+        <div class="sm:col-span-2">
+          <button class="w-full rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">+ Registrar</button>
+        </div>
+      </form>
+
+      <div class="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+        <table class="w-full text-left text-sm">
+          <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+            <tr>
+              <th class="px-4 py-3">N° Factura</th>
+              <th class="px-4 py-3">Emisión</th>
+              <th class="px-4 py-3">Vencimiento</th>
+              <th class="px-4 py-3">Valor</th>
+              <th class="px-4 py-3">Estado</th>
+              <th class="px-4 py-3"></th>
+            </tr>
+          </thead>
+          <tbody id="tabla-facturas"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- COMPRAS -->
+    <section data-tab-panel="compras" class="hidden space-y-4">
+      <div class="rounded-xl border border-gray-200 bg-white p-4">
+        <p class="text-xs font-medium text-gray-500">Total Comprado / Costos del Proyecto</p>
+        <p class="text-lg font-bold" id="compras-total">$ 0</p>
+      </div>
+
+      <form id="form-compra" class="grid grid-cols-1 gap-3 rounded-xl border border-gray-200 bg-white p-4 sm:grid-cols-12 sm:items-end">
+        <div class="sm:col-span-3">
+          <label class="mb-1 block text-xs font-medium text-gray-700">Proveedor</label>
+          <select id="compra-proveedor" class="w-full rounded-lg border-gray-300 text-sm">
+            <option value="">Sin proveedor / caja menor</option>
+          </select>
+        </div>
+        <div class="sm:col-span-2">
+          <label class="mb-1 block text-xs font-medium text-gray-700">Categoría</label>
+          <select id="compra-categoria" class="w-full rounded-lg border-gray-300 text-sm">
+            <option value="materiales">Materiales</option>
+            <option value="mano_obra">Mano de Obra</option>
+            <option value="otros">Otros</option>
+          </select>
+        </div>
+        <div class="sm:col-span-3">
+          <label class="mb-1 block text-xs font-medium text-gray-700">Descripción</label>
+          <input id="compra-descripcion" required class="w-full rounded-lg border-gray-300 text-sm" />
+        </div>
+        <div class="sm:col-span-2">
+          <label class="mb-1 block text-xs font-medium text-gray-700">Valor</label>
+          <input id="compra-valor" type="number" min="0" step="100" class="w-full rounded-lg border-gray-300 text-sm" />
+        </div>
+        <div class="sm:col-span-1">
+          <label class="mb-1 block text-xs font-medium text-gray-700">Fecha</label>
+          <input id="compra-fecha" type="date" class="w-full rounded-lg border-gray-300 text-sm" />
+        </div>
+        <div class="sm:col-span-1">
+          <button class="w-full rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">+</button>
+        </div>
+      </form>
+
+      <div class="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+        <table class="w-full text-left text-sm">
+          <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+            <tr>
+              <th class="px-4 py-3">Descripción</th>
+              <th class="px-4 py-3">Proveedor</th>
+              <th class="px-4 py-3">Categoría</th>
+              <th class="px-4 py-3">Fecha</th>
+              <th class="px-4 py-3">Valor</th>
+              <th class="px-4 py-3"></th>
+            </tr>
+          </thead>
+          <tbody id="tabla-compras"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- CONTRATISTAS -->
+    <section data-tab-panel="contratistas" class="hidden space-y-4">
+      <form id="form-contratista" class="grid grid-cols-1 gap-3 rounded-xl border border-gray-200 bg-white p-4 sm:grid-cols-12 sm:items-end">
+        <div class="sm:col-span-6">
+          <label class="mb-1 block text-xs font-medium text-gray-700">Contratista / Cuadrilla</label>
+          <select id="contratista-select" class="w-full rounded-lg border-gray-300 text-sm"></select>
+        </div>
+        <div class="sm:col-span-3">
+          <label class="mb-1 block text-xs font-medium text-gray-700">Valor Contratado</label>
+          <input id="contratista-valor" type="number" min="0" step="1000" class="w-full rounded-lg border-gray-300 text-sm" />
+        </div>
+        <div class="sm:col-span-3">
+          <button class="w-full rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">+ Vincular</button>
+        </div>
+      </form>
+
+      <div id="lista-contratistas" class="space-y-3"></div>
+    </section>
+  </main>
+</div>
+
+<script src="assets/js/layout.js"></script>
+<script src="assets/js/proyecto-detalle.js"></script>
+</body>
+</html>

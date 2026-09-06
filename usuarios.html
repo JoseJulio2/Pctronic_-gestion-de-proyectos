@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Usuarios · Pctronic</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+<script>
+  tailwind.config = {
+    theme: { extend: { colors: { primary: "#135bec" }, fontFamily: { display: ["Inter", "sans-serif"] } } },
+  };
+</script>
+<link rel="stylesheet" href="assets/css/styles.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="assets/js/config.js"></script>
+<script src="assets/js/supabaseClient.js"></script>
+<script src="assets/js/util.js"></script>
+</head>
+<body data-page="usuarios" data-title="Usuarios" class="font-display bg-gray-50 text-gray-900 antialiased">
+
+<div id="app-sidebar"></div>
+<div class="lg:pl-64">
+  <div id="app-topbar"></div>
+
+  <main class="p-6 space-y-4">
+    <div class="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+      <p class="font-semibold">¿Cómo creo un usuario nuevo para un empleado?</p>
+      <p class="mt-1">
+        Entra a tu proyecto de Supabase → <strong>Authentication → Users → Add user</strong>,
+        crea el correo y una contraseña temporal, y compártesela a la persona. En cuanto inicie
+        sesión aquí por primera vez, aparecerá automáticamente en esta lista para que le asignes su rol.
+      </p>
+    </div>
+
+    <div class="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+      <table class="w-full text-left text-sm">
+        <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+          <tr>
+            <th class="px-4 py-3">Nombre</th>
+            <th class="px-4 py-3">Rol</th>
+            <th class="px-4 py-3">Miembro desde</th>
+          </tr>
+        </thead>
+        <tbody id="tabla-usuarios">
+          <tr><td class="px-4 py-6 text-gray-400" colspan="3">Cargando…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+</div>
+
+<script src="assets/js/layout.js"></script>
+<script>
+  (async () => {
+    const { profile } = await window.pctronicReady;
+    if (profile?.rol !== "admin") {
+      document.querySelector("main").innerHTML = `
+        <div class="rounded-xl border border-gray-200 bg-white p-8 text-center text-gray-500">
+          Solo un administrador puede ver esta página.
+        </div>`;
+      return;
+    }
+
+    async function cargar() {
+      const { data, error } = await window.sb
+        .from("profiles")
+        .select("id, nombre_completo, rol, created_at")
+        .order("created_at");
+      if (error) return manejarError(error, "No se pudo cargar los usuarios");
+
+      document.getElementById("tabla-usuarios").innerHTML = data
+        .map(
+          (u) => `
+        <tr class="border-b border-gray-50 last:border-0">
+          <td class="px-4 py-3 font-medium">${escapeHtml(u.nombre_completo || "—")}</td>
+          <td class="px-4 py-3">
+            <select class="select-rol rounded-lg border-gray-300 text-xs" data-id="${u.id}">
+              <option value="miembro" ${u.rol === "miembro" ? "selected" : ""}>Miembro del equipo</option>
+              <option value="admin" ${u.rol === "admin" ? "selected" : ""}>Administrador</option>
+            </select>
+          </td>
+          <td class="px-4 py-3 text-gray-500">${formatoFecha(u.created_at)}</td>
+        </tr>`
+        )
+        .join("");
+
+      document.querySelectorAll(".select-rol").forEach((sel) =>
+        sel.addEventListener("change", async () => {
+          const { error } = await window.sb.from("profiles").update({ rol: sel.value }).eq("id", sel.dataset.id);
+          if (error) return manejarError(error, "No se pudo actualizar el rol");
+          mostrarAviso("Rol actualizado", "exito");
+        })
+      );
+    }
+    cargar();
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Proyectos · Pctronic</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+<script>
+  tailwind.config = {
+    theme: { extend: { colors: { primary: "#135bec" }, fontFamily: { display: ["Inter", "sans-serif"] } } },
+  };
+</script>
+<link rel="stylesheet" href="assets/css/styles.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="assets/js/config.js"></script>
+<script src="assets/js/supabaseClient.js"></script>
+<script src="assets/js/util.js"></script>
+</head>
+<body data-page="proyectos" data-title="Proyectos" class="font-display bg-gray-50 text-gray-900 antialiased">
+
+<div id="app-sidebar"></div>
+<div class="lg:pl-64">
+  <div id="app-topbar"></div>
+
+  <main class="p-6 space-y-4">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div class="flex flex-wrap items-center gap-3">
+        <input id="filtro-busqueda" type="search" placeholder="Buscar proyecto o cliente..."
+          class="w-64 rounded-lg border-gray-300 text-sm shadow-sm focus:border-primary focus:ring-primary" />
+        <select id="filtro-estado" class="rounded-lg border-gray-300 text-sm shadow-sm focus:border-primary focus:ring-primary">
+          <option value="">Estado: Todos</option>
+          <option value="sin_iniciar">Sin Iniciar</option>
+          <option value="en_curso">En Curso</option>
+          <option value="detenido">Detenido</option>
+          <option value="finalizado">Finalizado</option>
+        </select>
+      </div>
+      <a href="proyecto-nuevo.html"
+        class="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+        <span class="material-symbols-outlined text-[18px]">add</span>
+        Nuevo Proyecto
+      </a>
+    </div>
+
+    <div class="rounded-xl border border-gray-200 bg-white">
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+            <tr>
+              <th class="px-5 py-3">Nombre del Proyecto</th>
+              <th class="px-5 py-3">Estado</th>
+              <th class="px-5 py-3">Avance</th>
+              <th class="px-5 py-3">Valor Total</th>
+              <th class="px-5 py-3">Fecha Fin Estimada</th>
+              <th class="px-5 py-3"></th>
+            </tr>
+          </thead>
+          <tbody id="tabla-proyectos">
+            <tr><td class="px-5 py-6 text-gray-400" colspan="6">Cargando…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="assets/js/layout.js"></script>
+<script src="assets/js/proyectos.js"></script>
+</body>
+</html>

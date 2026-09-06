@@ -1,0 +1,81 @@
+// ============================================================================
+// Funciones de ayuda reutilizadas en toda la app.
+// ============================================================================
+
+function formatoMoneda(valor) {
+  const n = Number(valor || 0);
+  return n.toLocaleString("es-CO", {
+    style: "currency",
+    currency: "COP",
+    maximumFractionDigits: 0,
+  });
+}
+
+function formatoFecha(fecha) {
+  if (!fecha) return "—";
+  const d = new Date(fecha + (String(fecha).length <= 10 ? "T00:00:00" : ""));
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function escapeHtml(str) {
+  return String(str ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[c]));
+}
+
+const ESTADOS_PROYECTO = {
+  sin_iniciar: { label: "Sin Iniciar", clase: "bg-amber-100 text-amber-800" },
+  en_curso: { label: "En Curso", clase: "bg-blue-100 text-blue-800" },
+  detenido: { label: "Detenido", clase: "bg-gray-200 text-gray-700" },
+  finalizado: { label: "Finalizado", clase: "bg-green-100 text-green-800" },
+};
+
+const ESTADOS_FACTURA = {
+  pendiente: { label: "Pendiente", clase: "bg-amber-100 text-amber-800" },
+  pagada: { label: "Pagada", clase: "bg-green-100 text-green-800" },
+  vencida: { label: "Vencida", clase: "bg-red-100 text-red-800" },
+  anulada: { label: "Anulada", clase: "bg-gray-200 text-gray-700" },
+};
+
+const ESTADOS_CORTE = {
+  borrador: { label: "Borrador", clase: "bg-gray-200 text-gray-700" },
+  en_tramite: { label: "En Trámite", clase: "bg-amber-100 text-amber-800" },
+  pagado: { label: "Pagado", clase: "bg-green-100 text-green-800" },
+};
+
+function badgeHtml(mapa, valor) {
+  const info = mapa[valor] || { label: valor || "—", clase: "bg-gray-200 text-gray-700" };
+  return `<span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${info.clase}">${info.label}</span>`;
+}
+
+// Barra de notificaciones simple (éxito / error) en la esquina de la pantalla.
+function mostrarAviso(mensaje, tipo = "info") {
+  const colores = {
+    info: "bg-gray-900",
+    exito: "bg-green-600",
+    error: "bg-red-600",
+  };
+  const el = document.createElement("div");
+  el.className = `fixed bottom-5 right-5 z-50 max-w-sm rounded-lg px-4 py-3 text-sm text-white shadow-lg ${colores[tipo] || colores.info}`;
+  el.textContent = mensaje;
+  document.body.appendChild(el);
+  setTimeout(() => {
+    el.style.transition = "opacity .3s";
+    el.style.opacity = "0";
+    setTimeout(() => el.remove(), 300);
+  }, 3200);
+}
+
+function manejarError(error, contexto) {
+  console.error(contexto, error);
+  mostrarAviso((contexto ? contexto + ": " : "") + (error?.message || "Ocurrió un error"), "error");
+}
+
+function qs(name) {
+  return new URLSearchParams(window.location.search).get(name);
+}

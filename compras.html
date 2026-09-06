@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Compras y Costos · Pctronic</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+<script>
+  tailwind.config = {
+    theme: { extend: { colors: { primary: "#135bec" }, fontFamily: { display: ["Inter", "sans-serif"] } } },
+  };
+</script>
+<link rel="stylesheet" href="assets/css/styles.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="assets/js/config.js"></script>
+<script src="assets/js/supabaseClient.js"></script>
+<script src="assets/js/util.js"></script>
+</head>
+<body data-page="compras" data-title="Compras y Costos" class="font-display bg-gray-50 text-gray-900 antialiased">
+
+<div id="app-sidebar"></div>
+<div class="lg:pl-64">
+  <div id="app-topbar"></div>
+
+  <main class="p-6 space-y-4">
+    <p class="text-sm text-gray-500">
+      Vista global de todas las compras y costos de todos los proyectos. Para registrar una compra nueva, entra al proyecto correspondiente → pestaña "Compras".
+    </p>
+
+    <div class="rounded-xl border border-gray-200 bg-white p-4 sm:w-72">
+      <p class="text-xs font-medium text-gray-500">Total Comprado (filtro actual)</p>
+      <p class="text-lg font-bold" id="kpi-total">$ 0</p>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-3">
+      <input id="filtro-busqueda" type="search" placeholder="Buscar por proyecto o descripción..."
+        class="w-72 rounded-lg border-gray-300 text-sm shadow-sm focus:border-primary focus:ring-primary" />
+      <select id="filtro-categoria" class="rounded-lg border-gray-300 text-sm shadow-sm focus:border-primary focus:ring-primary">
+        <option value="">Categoría: Todas</option>
+        <option value="materiales">Materiales</option>
+        <option value="mano_obra">Mano de Obra</option>
+        <option value="otros">Otros</option>
+      </select>
+    </div>
+
+    <div class="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+      <table class="w-full text-left text-sm">
+        <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+          <tr>
+            <th class="px-4 py-3">Proyecto</th>
+            <th class="px-4 py-3">Descripción</th>
+            <th class="px-4 py-3">Proveedor</th>
+            <th class="px-4 py-3">Categoría</th>
+            <th class="px-4 py-3">Fecha</th>
+            <th class="px-4 py-3">Valor</th>
+          </tr>
+        </thead>
+        <tbody id="tabla-compras">
+          <tr><td class="px-4 py-6 text-gray-400" colspan="6">Cargando…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+</div>
+
+<script src="assets/js/layout.js"></script>
+<script src="assets/js/compras.js"></script>
+</body>
+</html>

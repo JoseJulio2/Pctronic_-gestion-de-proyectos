@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Crear Proyecto · Pctronic</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+<script>
+  tailwind.config = {
+    theme: { extend: { colors: { primary: "#135bec" }, fontFamily: { display: ["Inter", "sans-serif"] } } },
+  };
+</script>
+<link rel="stylesheet" href="assets/css/styles.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="assets/js/config.js"></script>
+<script src="assets/js/supabaseClient.js"></script>
+<script src="assets/js/util.js"></script>
+</head>
+<body data-page="proyectos" data-title="Crear Nuevo Proyecto" class="font-display bg-gray-50 text-gray-900 antialiased">
+
+<div id="app-sidebar"></div>
+<div class="lg:pl-64">
+  <div id="app-topbar"></div>
+
+  <main class="mx-auto max-w-3xl p-6">
+    <a href="proyectos.html" class="mb-4 inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800">
+      <span class="material-symbols-outlined text-[18px]">arrow_back</span> Volver a Proyectos
+    </a>
+
+    <form id="form-proyecto" class="space-y-6 rounded-xl border border-gray-200 bg-white p-6">
+      <div>
+        <h2 class="mb-4 text-base font-bold text-gray-900">Información General</h2>
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div class="sm:col-span-2">
+            <label class="mb-1 block text-sm font-medium text-gray-700">Nombre del Proyecto *</label>
+            <input id="nombre" required class="block w-full rounded-lg border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm" />
+          </div>
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">Cliente</label>
+            <div class="flex gap-2">
+              <select id="cliente_id" class="block w-full rounded-lg border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm">
+                <option value="">Seleccionar un cliente...</option>
+              </select>
+              <button type="button" id="btn-nuevo-cliente" title="Agregar cliente nuevo"
+                class="shrink-0 rounded-lg border border-gray-300 px-3 text-gray-600 hover:bg-gray-50">
+                <span class="material-symbols-outlined text-[18px]">add</span>
+              </button>
+            </div>
+          </div>
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">Tipo de Proyecto</label>
+            <select id="tipo_proyecto" class="block w-full rounded-lg border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm">
+              <option value="CCTV">CCTV</option>
+              <option value="Control de Acceso">Control de Acceso</option>
+              <option value="Alarmas">Alarmas</option>
+              <option value="Cableado Estructurado">Cableado Estructurado</option>
+              <option value="Domótica">Domótica</option>
+              <option value="Mantenimiento">Mantenimiento</option>
+              <option value="Otro">Otro</option>
+            </select>
+          </div>
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">Estado</label>
+            <select id="estado" class="block w-full rounded-lg border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm">
+              <option value="sin_iniciar">Sin Iniciar</option>
+              <option value="en_curso">En Curso</option>
+              <option value="detenido">Detenido</option>
+              <option value="finalizado">Finalizado</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h2 class="mb-4 text-base font-bold text-gray-900">Fechas Clave</h2>
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">Fecha de Contrato</label>
+            <input id="fecha_contrato" type="date" class="block w-full rounded-lg border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm" />
+          </div>
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">Fecha de Inicio</label>
+            <input id="fecha_inicio" type="date" class="block w-full rounded-lg border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm" />
+          </div>
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">Fin Estimado</label>
+            <input id="fecha_fin_estimada" type="date" class="block w-full rounded-lg border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm" />
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h2 class="mb-4 text-base font-bold text-gray-900">Información Financiera</h2>
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">Valor Total del Proyecto (COP)</label>
+            <input id="valor_total" type="number" min="0" step="1000" placeholder="0"
+              class="block w-full rounded-lg border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm" />
+            <p class="mt-1 text-xs text-gray-400">Podrás construir el presupuesto detallado (materiales / mano de obra) después de crear el proyecto.</p>
+          </div>
+          <div class="sm:col-span-2">
+            <label class="mb-1 block text-sm font-medium text-gray-700">Notas</label>
+            <textarea id="notas" rows="3" class="block w-full rounded-lg border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-3 border-t border-gray-100 pt-5">
+        <a href="proyectos.html" class="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50">Cancelar</a>
+        <button id="btn-guardar" type="submit" class="rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+          Crear Proyecto
+        </button>
+      </div>
+    </form>
+  </main>
+</div>
+
+<!-- Modal simple para agregar cliente rápido -->
+<div id="modal-cliente" class="fixed inset-0 z-40 hidden items-center justify-center bg-black/40 p-4">
+  <div class="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl">
+    <h3 class="mb-3 text-base font-bold text-gray-900">Nuevo Cliente</h3>
+    <label class="mb-1 block text-sm font-medium text-gray-700">Nombre / Razón social *</label>
+    <input id="nuevo-cliente-nombre" class="mb-4 block w-full rounded-lg border-gray-300 shadow-sm sm:text-sm" />
+    <div class="flex justify-end gap-2">
+      <button type="button" id="btn-cancelar-cliente" class="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Cancelar</button>
+      <button type="button" id="btn-guardar-cliente" class="rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<script src="assets/js/layout.js"></script>
+<script src="assets/js/proyecto-nuevo.js"></script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pctronic</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="assets/js/config.js"></script>
+<script src="assets/js/supabaseClient.js"></script>
+</head>
+<body>
+<script>
+  (async () => {
+    const { data: { session } } = await window.sb.auth.getSession();
+    window.location.replace(session ? "dashboard.html" : "login.html");
+  })();
+</script>
+</body>
+</html>
