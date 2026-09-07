@@ -68,6 +68,19 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
 
+-- El trigger de arriba solo crea el perfil de usuarios NUEVOS (a partir de ahora).
+-- Si ya tenías usuarios creados en Supabase antes de correr este script (por
+-- ejemplo, tu propio usuario administrador), esta parte les recrea su perfil:
+-- el usuario más antiguo queda como "admin" y los demás como "miembro" (lo
+-- puedes ajustar después desde la pestaña "Usuarios" dentro de la app).
+insert into public.profiles (id, nombre_completo, rol)
+select
+  u.id,
+  u.email,
+  case when u.id = (select id from auth.users order by created_at asc limit 1) then 'admin' else 'miembro' end
+from auth.users u
+where not exists (select 1 from public.profiles p where p.id = u.id);
+
 -- ----------------------------------------------------------------------------
 -- 2. EMPRESAS PROPIAS (las empresas de Jose, no clientes)
 -- ----------------------------------------------------------------------------
@@ -77,6 +90,7 @@ create table public.empresas (
   nit text,
   telefono text,
   email text,
+  logo_url text,
   created_at timestamptz not null default now()
 );
 
@@ -160,6 +174,7 @@ create table public.contratistas (
 create table public.proyectos (
   id uuid primary key default gen_random_uuid(),
   nombre text not null,
+  numero_contrato text,
   empresa_id uuid references public.empresas(id) on delete set null,
   cliente_id uuid references public.clientes(id) on delete set null,
   tipo_proyecto text[] not null default '{}',
@@ -169,7 +184,15 @@ create table public.proyectos (
   fecha_inicio date,
   fecha_fin_estimada date,
 
-  -- Valores del contrato: o bien IVA simple, o bien AIU
+  -- Quién ejecuta el proyecto en general (informativo; cada renglón del
+  -- presupuesto puede además tener su propio contratista específico).
+  ejecutor_tipo text not null default 'personal_propio'
+    check (ejecutor_tipo in ('personal_propio','contratista')),
+  contratista_principal_id uuid references public.contratistas(id) on delete set null,
+
+  -- Valores del contrato: o bien IVA simple, o bien AIU.
+  -- En AIU, el IVA se cobra ÚNICAMENTE sobre el componente de Utilidad (regla
+  -- estándar de la DIAN para contratos de obra/servicios bajo AIU).
   tipo_contrato text not null default 'iva' check (tipo_contrato in ('iva','aiu')),
   valor_antes_impuestos numeric(14,2) not null default 0,
   iva_porcentaje numeric(5,2) not null default 19,
@@ -184,6 +207,8 @@ create table public.proyectos (
                 + coalesce(imprevistos_porcentaje,0)
                 + coalesce(utilidad_porcentaje,0)) / 100.0
         )
+        -- + IVA solo sobre la Utilidad
+        + (valor_antes_impuestos * coalesce(utilidad_porcentaje,0) / 100.0) * coalesce(iva_porcentaje,0) / 100.0
       else
         valor_antes_impuestos * (1 + coalesce(iva_porcentaje,0) / 100.0)
     end
@@ -238,7 +263,7 @@ create table public.compras (
   proyecto_id uuid not null references public.proyectos(id) on delete cascade,
   proveedor_id uuid references public.proveedores(id) on delete set null,
   categoria text not null default 'materiales'
-    check (categoria in ('materiales','mano_obra','equipos','otros')),
+    check (categoria in ('materiales','mano_obra','equipos','alquiler','otros')),
   descripcion text not null,
   valor_antes_iva numeric(14,2) not null default 0,
   iva_porcentaje numeric(5,2) not null default 19,
@@ -314,6 +339,97 @@ create table public.ejecucion_generaciones (
 );
 
 -- ----------------------------------------------------------------------------
+-- 11B. DOCUMENTOS DEL PROYECTO (contratos, cotizaciones, órdenes, planos...)
+-- ----------------------------------------------------------------------------
+create table public.documentos (
+  id uuid primary key default gen_random_uuid(),
+  proyecto_id uuid not null references public.proyectos(id) on delete cascade,
+  categoria text not null default 'otro'
+    check (categoria in ('contrato','cotizacion','orden_compra','planos','acta_entrega','corte','otro')),
+  nombre_archivo text not null,
+  url text not null,
+  subido_por uuid references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+-- ----------------------------------------------------------------------------
+-- 11C. TAREAS / EJECUCIÓN ESTILO ASANA (Kanban + Gantt)
+-- ----------------------------------------------------------------------------
+-- El avance del proyecto se calcula ponderando cada tarea por el costo de
+-- venta del renglón de presupuesto que tenga vinculado (si no tiene, usa
+-- peso_manual). Una tarea "hecha" aporta el 100% de su peso; el resto 0%.
+create table public.tareas (
+  id uuid primary key default gen_random_uuid(),
+  proyecto_id uuid not null references public.proyectos(id) on delete cascade,
+  presupuesto_item_id uuid references public.presupuesto_items(id) on delete set null,
+  titulo text not null,
+  descripcion text,
+  estado text not null default 'todo'
+    check (estado in ('todo','en_progreso','revision','hecho')),
+  fecha_inicio date,
+  fecha_fin date,
+  orden int not null default 0,
+  peso_manual numeric(14,2),
+  created_at timestamptz not null default now()
+);
+
+-- Recalcula el % de avance del proyecto cada vez que cambian sus tareas,
+-- ponderando por el valor del renglón de presupuesto vinculado (o el peso
+-- manual si no tiene renglón). No se puede hacer con una columna generada
+-- porque necesita mirar varias filas de otra tabla.
+create or replace function public.recalcular_avance_proyecto()
+returns trigger
+language plpgsql
+as $$
+declare
+  v_proyecto_id uuid;
+  v_total_peso numeric;
+  v_peso_hecho numeric;
+  v_nuevo_avance int;
+begin
+  v_proyecto_id := coalesce(new.proyecto_id, old.proyecto_id);
+
+  select
+    coalesce(sum(coalesce(pi.valor_total, t.peso_manual, 1)), 0),
+    coalesce(sum(case when t.estado = 'hecho' then coalesce(pi.valor_total, t.peso_manual, 1) else 0 end), 0)
+  into v_total_peso, v_peso_hecho
+  from public.tareas t
+  left join public.presupuesto_items pi on pi.id = t.presupuesto_item_id
+  where t.proyecto_id = v_proyecto_id;
+
+  v_nuevo_avance := case when v_total_peso > 0 then round((v_peso_hecho / v_total_peso) * 100) else 0 end;
+
+  update public.proyectos set avance_porcentaje = v_nuevo_avance where id = v_proyecto_id;
+  return null;
+end;
+$$;
+
+drop trigger if exists trg_recalcular_avance on public.tareas;
+create trigger trg_recalcular_avance
+  after insert or update or delete on public.tareas
+  for each row execute procedure public.recalcular_avance_proyecto();
+
+-- ----------------------------------------------------------------------------
+-- 11D. SUMINISTROS (ventas de equipos/insumos sin instalación, para el
+-- panel de comité de gerencia)
+-- ----------------------------------------------------------------------------
+create table public.suministros (
+  id uuid primary key default gen_random_uuid(),
+  cliente_id uuid references public.clientes(id) on delete set null,
+  empresa_id uuid references public.empresas(id) on delete set null,
+  oferta text,
+  fecha_notificacion date,
+  fecha_recibo_insumos date,
+  fecha_cierre date,
+  valor_venta numeric(14,2) not null default 0,
+  iva_incluido boolean not null default true,
+  estado text not null default 'en_curso'
+    check (estado in ('en_curso','cerrado','cancelado')),
+  notas text,
+  created_at timestamptz not null default now()
+);
+
+-- ----------------------------------------------------------------------------
 -- 12. SEGURIDAD (Row Level Security)
 -- ----------------------------------------------------------------------------
 -- Igual que antes: cualquier usuario con cuenta creada por ti puede ver y
@@ -328,7 +444,8 @@ begin
       'profiles','empresas','clientes','clientes_contactos','proveedores',
       'proveedores_contactos','contratistas','proyectos','presupuesto_items',
       'facturas','compras','proyecto_contratistas','cortes_pago',
-      'ejecucion_cortes','ejecucion_items','ejecucion_generaciones'
+      'ejecucion_cortes','ejecucion_items','ejecucion_generaciones',
+      'documentos','tareas','suministros'
     ])
   loop
     execute format('alter table public.%I enable row level security;', t);
@@ -350,25 +467,33 @@ end $$;
 -- ----------------------------------------------------------------------------
 -- 13. ALMACENAMIENTO (fotos de perfil)
 -- ----------------------------------------------------------------------------
-insert into storage.buckets (id, name, public)
-values ('avatars', 'avatars', true)
-on conflict (id) do nothing;
+-- 'avatars' = fotos de perfil, 'logos' = logos de tus empresas (para los PDF),
+-- 'documentos' = archivos adjuntos de cada proyecto (contratos, planos, etc).
+-- Los tres son públicos para simplificar (igual que el resto de la app, la
+-- seguridad real es que solo tu equipo tiene usuario).
+do $$
+declare
+  b text;
+begin
+  for b in select unnest(array['avatars','logos','documentos'])
+  loop
+    insert into storage.buckets (id, name, public)
+    values (b, b, true)
+    on conflict (id) do nothing;
 
-drop policy if exists "avatars_public_read" on storage.objects;
-create policy "avatars_public_read" on storage.objects
-  for select using (bucket_id = 'avatars');
+    execute format('drop policy if exists "%s_public_read" on storage.objects;', b);
+    execute format('create policy "%s_public_read" on storage.objects for select using (bucket_id = %L);', b, b);
 
-drop policy if exists "avatars_authenticated_write" on storage.objects;
-create policy "avatars_authenticated_write" on storage.objects
-  for insert to authenticated with check (bucket_id = 'avatars');
+    execute format('drop policy if exists "%s_authenticated_write" on storage.objects;', b);
+    execute format('create policy "%s_authenticated_write" on storage.objects for insert to authenticated with check (bucket_id = %L);', b, b);
 
-drop policy if exists "avatars_authenticated_update" on storage.objects;
-create policy "avatars_authenticated_update" on storage.objects
-  for update to authenticated using (bucket_id = 'avatars');
+    execute format('drop policy if exists "%s_authenticated_update" on storage.objects;', b);
+    execute format('create policy "%s_authenticated_update" on storage.objects for update to authenticated using (bucket_id = %L);', b, b);
 
-drop policy if exists "avatars_authenticated_delete" on storage.objects;
-create policy "avatars_authenticated_delete" on storage.objects
-  for delete to authenticated using (bucket_id = 'avatars');
+    execute format('drop policy if exists "%s_authenticated_delete" on storage.objects;', b);
+    execute format('create policy "%s_authenticated_delete" on storage.objects for delete to authenticated using (bucket_id = %L);', b, b);
+  end loop;
+end $$;
 
 -- ----------------------------------------------------------------------------
 -- 14. DATOS DE EJEMPLO (opcional, para probar de inmediato)

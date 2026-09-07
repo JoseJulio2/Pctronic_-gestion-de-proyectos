@@ -23,11 +23,30 @@
     return v;
   }
 
+  function celdaImagen(fila) {
+    if (!cfg.campoImagen) return "";
+    const url = fila[cfg.campoImagen.key];
+    return `
+      <td class="px-4 py-3">
+        <div class="flex items-center gap-2">
+          <div class="flex h-10 w-10 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-gray-50 bg-cover bg-center" ${url ? `style="background-image:url('${url}')"` : ""}>
+            ${url ? "" : '<span class="material-symbols-outlined text-[18px] text-gray-300">image</span>'}
+          </div>
+          <label class="cursor-pointer text-xs font-semibold text-primary hover:underline">
+            Subir
+            <input type="file" accept="image/*" class="hidden input-imagen" data-id="${fila.id}" />
+          </label>
+        </div>
+      </td>`;
+  }
+
   function celdas(fila) {
-    return cfg.campos
-      .filter((c) => c.enTabla !== false)
-      .map((c) => `<td class="px-4 py-3">${escapeHtml(valorVisible(c, fila))}</td>`)
-      .join("");
+    return (
+      cfg.campos
+        .filter((c) => c.enTabla !== false)
+        .map((c) => `<td class="px-4 py-3">${escapeHtml(valorVisible(c, fila))}</td>`)
+        .join("") + celdaImagen(fila)
+    );
   }
 
   function render() {
@@ -56,7 +75,7 @@
         </tr>`
           )
           .join("")
-      : `<tr><td class="px-4 py-8 text-center text-gray-400" colspan="${cfg.campos.filter((c) => c.enTabla !== false).length + 1}">Sin registros todavía.</td></tr>`;
+      : `<tr><td class="px-4 py-8 text-center text-gray-400" colspan="${cfg.campos.filter((c) => c.enTabla !== false).length + 1 + (cfg.campoImagen ? 1 : 0)}">Sin registros todavía.</td></tr>`;
 
     tbody.querySelectorAll(".btn-editar").forEach((btn) =>
       btn.addEventListener("click", (ev) => {
@@ -78,6 +97,37 @@
         tr.addEventListener("click", () => {
           const fila = cache.find((f) => f.id === tr.dataset.detalleId);
           if (fila) window.location.href = cfg.detalleUrl(fila);
+        })
+      );
+    }
+    if (cfg.campoImagen) {
+      tbody.querySelectorAll(".input-imagen").forEach((input) =>
+        input.addEventListener("click", (ev) => ev.stopPropagation())
+      );
+      tbody.querySelectorAll(".input-imagen").forEach((input) =>
+        input.addEventListener("change", async (ev) => {
+          const file = ev.target.files[0];
+          if (!file) return;
+          if (!file.type.startsWith("image/")) {
+            mostrarAviso("Selecciona un archivo de imagen", "error");
+            return;
+          }
+          const registroId = ev.target.dataset.id;
+          const extension = (file.name.split(".").pop() || "png").toLowerCase();
+          const ruta = `${registroId}/${cfg.campoImagen.key}.${extension}`;
+          const { error: errorSubida } = await window.sb.storage
+            .from(cfg.campoImagen.bucket)
+            .upload(ruta, file, { upsert: true, cacheControl: "3600" });
+          if (errorSubida) return manejarError(errorSubida, "No se pudo subir la imagen");
+          const { data: publicUrlData } = window.sb.storage.from(cfg.campoImagen.bucket).getPublicUrl(ruta);
+          const urlConVersion = `${publicUrlData.publicUrl}?v=${Date.now()}`;
+          const { error: errorActualizar } = await window.sb
+            .from(cfg.tabla)
+            .update({ [cfg.campoImagen.key]: urlConVersion })
+            .eq("id", registroId);
+          if (errorActualizar) return manejarError(errorActualizar, "No se pudo guardar la imagen");
+          mostrarAviso("Imagen actualizada", "exito");
+          cargar();
         })
       );
     }

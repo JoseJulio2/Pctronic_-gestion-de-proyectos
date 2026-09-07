@@ -45,11 +45,12 @@
             <th class="px-4 py-3">NIT</th>
             <th class="px-4 py-3">Teléfono</th>
             <th class="px-4 py-3">Correo</th>
+            <th class="px-4 py-3">Logo</th>
             <th class="px-4 py-3"></th>
           </tr>
         </thead>
         <tbody id="tabla-catalogo">
-          <tr><td class="px-4 py-6 text-gray-400" colspan="5">Cargando…</td></tr>
+          <tr><td class="px-4 py-6 text-gray-400" colspan="6">Cargando…</td></tr>
         </tbody>
       </table>
     </div>
@@ -78,6 +79,7 @@
       { key: "telefono", label: "Teléfono", tipo: "tel" },
       { key: "email", label: "Correo", tipo: "email" },
     ],
+    campoImagen: { key: "logo_url", bucket: "logos", label: "Logo" },
   };
 </script>
 <script src="assets/js/catalogo.js"></script>

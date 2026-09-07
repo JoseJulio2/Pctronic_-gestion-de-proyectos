@@ -71,6 +71,23 @@
               <option value="finalizado">Finalizado</option>
             </select>
           </div>
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">N° de Contrato</label>
+            <input id="numero_contrato" class="block w-full rounded-lg border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm" placeholder="Ej. CT-2026-014" />
+          </div>
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">¿Quién ejecuta el proyecto?</label>
+            <select id="ejecutor_tipo" class="block w-full rounded-lg border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm">
+              <option value="personal_propio">Personal propio</option>
+              <option value="contratista">Contratista</option>
+            </select>
+          </div>
+          <div id="bloque-contratista-principal" class="hidden">
+            <label class="mb-1 block text-sm font-medium text-gray-700">Contratista principal</label>
+            <select id="contratista_principal_id" class="block w-full rounded-lg border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm">
+              <option value="">Seleccionar contratista...</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -101,11 +118,12 @@
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label class="mb-1 block text-sm font-medium text-gray-700">Valor antes de impuestos (COP)</label>
-            <input id="valor_antes_impuestos" class="input-moneda block w-full rounded-lg border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm" inputmode="numeric" placeholder="0" />
+            <input id="valor_antes_impuestos" class="input-moneda block w-full rounded-lg border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm" inputmode="decimal" placeholder="0" />
           </div>
           <div id="bloque-iva">
-            <label class="mb-1 block text-sm font-medium text-gray-700">IVA (%)</label>
+            <label id="label-iva" class="mb-1 block text-sm font-medium text-gray-700">IVA (%)</label>
             <input id="iva_porcentaje" type="number" min="0" step="0.5" value="19" class="block w-full rounded-lg border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm" />
+            <p id="nota-iva-aiu" class="mt-1 hidden text-xs text-gray-400">En contratos AIU, el IVA se calcula solo sobre el componente de Utilidad.</p>
           </div>
           <div id="bloque-aiu" class="hidden grid grid-cols-3 gap-2 sm:col-span-2">
             <div>

@@ -1,5 +1,5 @@
 (async () => {
-  await window.pctronicReady;
+  const { session } = await window.pctronicReady;
 
   const proyectoId = qs("id");
   if (!proyectoId) {
@@ -38,7 +38,7 @@
   async function cargarProyecto() {
     const { data, error } = await window.sb
       .from("proyectos")
-      .select("*, clientes(id, nombre), empresas(id, nombre)")
+      .select("*, clientes(id, nombre), empresas(id, nombre, logo_url)")
       .eq("id", proyectoId)
       .single();
 
@@ -149,7 +149,7 @@
             </div>
             <div>
               <label class="mb-1 block text-xs font-medium text-gray-700">Valor antes de impuestos (COP)</label>
-              <input id="c-valor-antes" class="input-moneda w-full rounded-lg border-gray-300 text-sm" inputmode="numeric" />
+              <input id="c-valor-antes" class="input-moneda w-full rounded-lg border-gray-300 text-sm" inputmode="decimal" />
             </div>
             <div id="c-bloque-iva">
               <label class="mb-1 block text-xs font-medium text-gray-700">IVA (%)</label>
@@ -245,14 +245,23 @@
   // RESUMEN
   // --------------------------------------------------------------------
   async function renderResumen() {
-    const [{ data: facturas }, { data: compras }] = await Promise.all([
+    const [{ data: facturas }, { data: compras }, { data: vinculos }] = await Promise.all([
       window.sb.from("facturas").select("valor, estado").eq("proyecto_id", proyectoId),
       window.sb.from("compras").select("valor").eq("proyecto_id", proyectoId),
+      window.sb.from("proyecto_contratistas").select("cortes_pago(valor_neto)").eq("proyecto_id", proyectoId),
     ]);
 
     const totalFacturado = (facturas || []).reduce((a, f) => a + Number(f.valor || 0), 0);
     const totalComprado = (compras || []).reduce((a, c) => a + Number(c.valor || 0), 0);
-    const utilidadEstimada = Number(proyecto.valor_total || 0) - totalComprado;
+    const totalPagadoContratistas = (vinculos || []).reduce(
+      (a, v) => a + (v.cortes_pago || []).reduce((a2, c) => a2 + Number(c.valor_neto || 0), 0),
+      0
+    );
+    const costosTotales = totalComprado + totalPagadoContratistas;
+    const valorTotalContrato = Number(proyecto.valor_total || 0);
+    const utilidadEstimada = valorTotalContrato - costosTotales;
+    // Margen bruto = (Valor total del contrato − Costos totales) ÷ Valor total del contrato
+    const margenBruto = valorTotalContrato > 0 ? (utilidadEstimada / valorTotalContrato) * 100 : 0;
 
     const kpi = (icon, label, valor, color) => `
       <div class="rounded-xl border border-gray-200 bg-white p-4">
@@ -270,8 +279,9 @@
     document.getElementById("resumen-kpis").innerHTML =
       kpi("payments", "Valor Total Contrato", formatoMoneda(proyecto.valor_total), "bg-blue-100 text-primary") +
       kpi("receipt_long", "Facturado", formatoMoneda(totalFacturado), "bg-green-100 text-green-700") +
-      kpi("shopping_cart", "Comprado / Costos", formatoMoneda(totalComprado), "bg-amber-100 text-amber-700") +
-      kpi("trending_up", "Utilidad Estimada", formatoMoneda(utilidadEstimada), utilidadEstimada >= 0 ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700");
+      kpi("shopping_cart", "Costos (compras + contratistas)", formatoMoneda(costosTotales), "bg-amber-100 text-amber-700") +
+      kpi("trending_up", "Utilidad Estimada", formatoMoneda(utilidadEstimada), utilidadEstimada >= 0 ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700") +
+      kpi("percent", "Margen Bruto", `${margenBruto.toFixed(1)}%`, margenBruto >= 0 ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700");
 
     document.getElementById("resumen-info").innerHTML = `
       <div class="flex justify-between border-b border-gray-50 pb-2"><dt class="text-gray-500">Empresa</dt><dd class="font-medium">${escapeHtml(proyecto.empresas?.nombre || "—")}</dd></div>
@@ -299,6 +309,24 @@
       contratistasCache.map((c) => `<option value="${c.id}">${escapeHtml(c.nombre)}</option>`).join("");
   }
 
+  // Suma, por categoría (tipo de renglón), lo realmente ejecutado hasta la fecha
+  // (todos los cortes de ejecución del proyecto), para calcular % de presupuesto gastado.
+  async function calcularEjecutadoPorTipo() {
+    const { data: cortes } = await window.sb.from("ejecucion_cortes").select("id").eq("proyecto_id", proyectoId);
+    const corteIds = (cortes || []).map((c) => c.id);
+    if (!corteIds.length) return {};
+    const { data: items } = await window.sb
+      .from("ejecucion_items")
+      .select("valor_periodo, presupuesto_items(tipo)")
+      .in("corte_id", corteIds);
+    const acumulado = {};
+    (items || []).forEach((i) => {
+      const tipo = i.presupuesto_items?.tipo || "OTRO";
+      acumulado[tipo] = (acumulado[tipo] || 0) + Number(i.valor_periodo || 0);
+    });
+    return acumulado;
+  }
+
   async function cargarPresupuesto() {
     const { data, error } = await window.sb
       .from("presupuesto_items")
@@ -314,12 +342,30 @@
     const totalEquipo = totalPorTipo("EQUIPO");
     const totalAlquiler = totalPorTipo("ALQUILER");
     const totalOtro = totalPorTipo("OTRO");
+    const totalGeneral = totalMO + totalMP + totalEquipo + totalAlquiler + totalOtro;
 
     document.getElementById("presu-total-mo").textContent = formatoMoneda(totalMO);
     document.getElementById("presu-total-mp").textContent = formatoMoneda(totalMP);
     document.getElementById("presu-total-equipo").textContent = formatoMoneda(totalEquipo);
     document.getElementById("presu-total-alquiler").textContent = formatoMoneda(totalAlquiler);
-    document.getElementById("presu-total-general").textContent = formatoMoneda(totalMO + totalMP + totalEquipo + totalAlquiler + totalOtro);
+    document.getElementById("presu-total-otro").textContent = formatoMoneda(totalOtro);
+    document.getElementById("presu-total-general").textContent = formatoMoneda(totalGeneral);
+
+    const ejecutadoPorTipo = await calcularEjecutadoPorTipo();
+    const pintarPct = (sufijo, ejecutado, presupuestado) => {
+      const pct = presupuestado > 0 ? Math.min(100, Math.round((ejecutado / presupuestado) * 100)) : 0;
+      const barra = document.getElementById(`presu-pct-${sufijo}`);
+      const texto = document.getElementById(`presu-pct-${sufijo}-txt`);
+      if (barra) barra.style.width = `${pct}%`;
+      if (texto) texto.textContent = `${pct}%`;
+    };
+    pintarPct("mo", ejecutadoPorTipo.MO || 0, totalMO);
+    pintarPct("mp", ejecutadoPorTipo.MP || 0, totalMP);
+    pintarPct("equipo", ejecutadoPorTipo.EQUIPO || 0, totalEquipo);
+    pintarPct("alquiler", ejecutadoPorTipo.ALQUILER || 0, totalAlquiler);
+    pintarPct("otro", ejecutadoPorTipo.OTRO || 0, totalOtro);
+    const totalEjecutado = Object.values(ejecutadoPorTipo).reduce((a, v) => a + v, 0);
+    pintarPct("general", totalEjecutado, totalGeneral);
 
     document.getElementById("tabla-presupuesto").innerHTML = presupuestoCache.length
       ? presupuestoCache
@@ -521,7 +567,7 @@
     const total = data.reduce((a, c) => a + Number(c.valor), 0);
     document.getElementById("compras-total").textContent = formatoMoneda(total);
 
-    const etiquetaCat = { materiales: "Materiales", mano_obra: "Mano de Obra", equipos: "Equipos", otros: "Otros" };
+    const etiquetaCat = { equipos: "Equipos", mano_obra: "Mano de Obra", materiales: "Materiales", alquiler: "Alquiler", otros: "Otros" };
 
     document.getElementById("tabla-compras").innerHTML = data.length
       ? data
@@ -635,11 +681,11 @@
               </div>
               <div class="sm:col-span-2">
                 <label class="mb-1 block text-xs font-medium text-gray-700">Valor Bruto</label>
-                <input class="corte-bruto input-moneda w-full rounded-lg border-gray-300 text-xs" inputmode="numeric" />
+                <input class="corte-bruto input-moneda w-full rounded-lg border-gray-300 text-xs" inputmode="decimal" />
               </div>
               <div class="sm:col-span-2">
                 <label class="mb-1 block text-xs font-medium text-gray-700">Retenciones</label>
-                <input class="corte-retenciones input-moneda w-full rounded-lg border-gray-300 text-xs" inputmode="numeric" />
+                <input class="corte-retenciones input-moneda w-full rounded-lg border-gray-300 text-xs" inputmode="decimal" />
               </div>
               <div class="sm:col-span-2">
                 <label class="mb-1 block text-xs font-medium text-gray-700">Estado</label>
@@ -775,6 +821,8 @@
   // --------------------------------------------------------------------
   // EJECUCIÓN / AVANCE DE OBRA
   // --------------------------------------------------------------------
+  let todosLosCortesCache = [];
+
   async function cargarCortesEjecucion() {
     const { data: cortes, error } = await window.sb
       .from("ejecucion_cortes")
@@ -783,18 +831,30 @@
       .order("numero_corte", { ascending: false });
     if (error) return manejarError(error, "No se pudo cargar la ejecución");
 
+    todosLosCortesCache = cortes || [];
     const cont = document.getElementById("lista-cortes");
     if (!cortes.length) {
-      cont.innerHTML = `<p class="rounded-xl border border-dashed border-gray-300 p-6 text-center text-gray-400">Aún no has creado ningún corte de ejecución. Crea uno para registrar avances/instalaciones.</p>`;
+      cont.innerHTML = `<p class="rounded-xl border border-dashed border-gray-300 p-6 text-center text-gray-400">Aún no has creado ningún corte de obra. Crea uno para registrar avances/instalaciones.</p>`;
       return;
     }
 
-    cont.innerHTML = cortes.map((corte) => renderCorteCard(corte)).join("");
+    cont.innerHTML = cortes.map((corte) => renderCorteCard(corte, cortes)).join("");
 
     cortes.forEach((corte) => conectarEventosCorte(corte));
   }
 
-  function renderCorteCard(corte) {
+  // Cantidad acumulada ejecutada de un renglón hasta (e incluyendo) el corte dado,
+  // sumando todos los cortes con numero_corte <= corte.numero_corte.
+  function acumuladoHasta(presupuestoItemId, corte, todosLosCortes) {
+    return todosLosCortes
+      .filter((c) => c.numero_corte <= corte.numero_corte)
+      .reduce((acc, c) => {
+        const item = (c.ejecucion_items || []).find((i) => i.presupuesto_item_id === presupuestoItemId);
+        return acc + Number(item?.cantidad_periodo || 0);
+      }, 0);
+  }
+
+  function renderCorteCard(corte, todosLosCortes) {
     const items = corte.ejecucion_items || [];
     const totalCorte = items.reduce((a, i) => a + Number(i.valor_periodo || 0), 0);
     const yaFacturado = (corte.ejecucion_generaciones || []).some((g) => g.tipo === "factura");
@@ -804,12 +864,12 @@
     <div class="rounded-xl border border-gray-200 bg-white p-4" data-corte-card="${corte.id}">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p class="font-bold text-gray-900">Corte N° ${corte.numero_corte} — ${formatoFecha(corte.fecha_corte)}</p>
+          <p class="font-bold text-gray-900">Corte de Obra N° ${corte.numero_corte} — ${formatoFecha(corte.fecha_corte)}</p>
           <p class="text-xs text-gray-500">${escapeHtml(corte.descripcion || "")}</p>
         </div>
         <div class="flex items-center gap-4">
           <div class="text-right">
-            <p class="text-xs text-gray-500">Valor total del corte</p>
+            <p class="text-xs text-gray-500">Valor de este corte</p>
             <p class="font-semibold text-primary">${formatoMoneda(totalCorte)}</p>
           </div>
           <button class="btn-toggle-corte rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">
@@ -819,13 +879,16 @@
       </div>
 
       <div class="hidden mt-4 border-t border-gray-100 pt-4 panel-corte">
-        <p class="mb-2 text-xs text-gray-500">Ingresa la cantidad avanzada/instalada de cada renglón en este corte (puede incluir cantidades pactadas con el cliente).</p>
+        <p class="mb-2 text-xs text-gray-500">Cantidades iniciales (presupuesto), acumulado ejecutado a la fecha, pendiente y lo ejecutado en este corte.</p>
         <div class="overflow-x-auto">
           <table class="w-full text-left text-xs">
             <thead class="text-gray-500">
               <tr>
                 <th class="py-1.5 pr-3">Renglón</th>
                 <th class="py-1.5 pr-3">Contratista</th>
+                <th class="py-1.5 pr-3">Cant. Inicial</th>
+                <th class="py-1.5 pr-3">Ejecutado Acum.</th>
+                <th class="py-1.5 pr-3">Pendiente</th>
                 <th class="py-1.5 pr-3">Vlr. Unitario</th>
                 <th class="py-1.5 pr-3">Cant. este corte</th>
                 <th class="py-1.5 pr-3">Valor del corte</th>
@@ -835,10 +898,15 @@
               ${presupuestoCache
                 .map((pi) => {
                   const existente = items.find((i) => i.presupuesto_item_id === pi.id);
+                  const acumulado = acumuladoHasta(pi.id, corte, todosLosCortes);
+                  const pendiente = Number(pi.cantidad) - acumulado;
                   return `
                 <tr data-presupuesto-item-id="${pi.id}">
                   <td class="py-1.5 pr-3">${escapeHtml(pi.descripcion)} <span class="text-gray-400">(${ETIQUETA_TIPO_ITEM[pi.tipo] || pi.tipo})</span></td>
                   <td class="py-1.5 pr-3">${escapeHtml(pi.contratistas?.nombre || "—")}</td>
+                  <td class="py-1.5 pr-3">${pi.cantidad} ${escapeHtml(pi.unidad || "")}</td>
+                  <td class="py-1.5 pr-3">${acumulado} ${escapeHtml(pi.unidad || "")}</td>
+                  <td class="py-1.5 pr-3 ${pendiente < 0 ? "text-red-600 font-semibold" : ""}">${pendiente} ${escapeHtml(pi.unidad || "")}</td>
                   <td class="py-1.5 pr-3">${formatoMoneda(pi.valor_unitario)}</td>
                   <td class="py-1.5 pr-3">
                     <input type="number" min="0" step="0.01" class="input-cantidad-corte w-24 rounded-lg border-gray-300 text-xs"
@@ -861,6 +929,19 @@
           <button class="btn-generar-cortes-contratista rounded-lg border border-gray-400 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50" ${contratistasEnCorte.length ? "" : "disabled"}>
             Generar cortes de pago a contratistas
           </button>
+          <button class="btn-pdf-corte-cliente rounded-lg border border-gray-400 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">
+            <span class="material-symbols-outlined align-middle text-[14px]">picture_as_pdf</span> Acta (Cliente)
+          </button>
+          ${
+            contratistasEnCorte
+              .map(
+                (cid) => `
+          <button class="btn-pdf-corte-contratista rounded-lg border border-gray-400 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50" data-contratista-id="${cid}">
+            <span class="material-symbols-outlined align-middle text-[14px]">picture_as_pdf</span> Acta (${escapeHtml(contratistasCache.find((c) => c.id === cid)?.nombre || "Contratista")})
+          </button>`
+              )
+              .join("")
+          }
         </div>
       </div>
     </div>`;
@@ -1028,6 +1109,35 @@
       cargarCortesEjecucion();
       cargarContratistasProyecto();
     });
+
+    const btnPdfCliente = card.querySelector(".btn-pdf-corte-cliente");
+    if (btnPdfCliente) {
+      btnPdfCliente.addEventListener("click", () => {
+        if (typeof generarActaCortePDF !== "function") return mostrarAviso("El generador de PDF aún no está disponible", "error");
+        generarActaCortePDF({
+          proyecto,
+          corte,
+          todosLosCortes: todosLosCortesCache,
+          presupuestoCache,
+          variante: "cliente",
+        });
+      });
+    }
+
+    card.querySelectorAll(".btn-pdf-corte-contratista").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (typeof generarActaCortePDF !== "function") return mostrarAviso("El generador de PDF aún no está disponible", "error");
+        generarActaCortePDF({
+          proyecto,
+          corte,
+          todosLosCortes: todosLosCortesCache,
+          presupuestoCache,
+          variante: "contratista",
+          contratistaId: btn.dataset.contratistaId,
+          contratistasCache,
+        });
+      });
+    });
   }
 
   document.getElementById("btn-nuevo-corte").addEventListener("click", async () => {
@@ -1050,6 +1160,445 @@
   });
 
   // --------------------------------------------------------------------
+  // TAREAS (Ejecución estilo Asana: Kanban + Gantt) — alimentan el % de avance
+  // --------------------------------------------------------------------
+  let tareasCache = [];
+  const ESTADOS_TAREA = { todo: "Por Hacer", en_progreso: "En Progreso", revision: "Revisión", hecho: "Hecho" };
+  const GANTT_PX_POR_DIA = 26;
+  let ganttDragState = null;
+
+  async function cargarTareas() {
+    const { data, error } = await window.sb
+      .from("tareas")
+      .select("*, presupuesto_items(descripcion, valor_total)")
+      .eq("proyecto_id", proyectoId)
+      .order("orden");
+    if (error) return manejarError(error, "No se pudo cargar las tareas");
+    tareasCache = data || [];
+    renderKanban();
+    renderGantt();
+  }
+
+  function tarjetaTareaHtml(t) {
+    return `
+      <div class="tarea-card cursor-move rounded-lg border border-gray-200 bg-white p-2.5 text-xs shadow-sm" draggable="true" data-tarea-id="${t.id}">
+        <p class="font-semibold text-gray-800">${escapeHtml(t.titulo)}</p>
+        ${t.presupuesto_items?.descripcion ? `<p class="mt-0.5 text-[11px] text-gray-400">Vinculada a: ${escapeHtml(t.presupuesto_items.descripcion)}</p>` : ""}
+        <div class="mt-1.5 flex items-center justify-between text-[11px] text-gray-400">
+          <span>${t.fecha_inicio ? formatoFecha(t.fecha_inicio) : "—"} → ${t.fecha_fin ? formatoFecha(t.fecha_fin) : "—"}</span>
+          <button class="btn-borrar-tarea text-gray-300 hover:text-red-600" data-id="${t.id}">
+            <span class="material-symbols-outlined text-[14px]">delete</span>
+          </button>
+        </div>
+      </div>`;
+  }
+
+  function renderKanban() {
+    Object.keys(ESTADOS_TAREA).forEach((estado) => {
+      const lista = document.querySelector(`.kanban-lista[data-estado="${estado}"]`);
+      if (!lista) return;
+      const tareasEstado = tareasCache.filter((t) => t.estado === estado);
+      lista.innerHTML = tareasEstado.length
+        ? tareasEstado.map(tarjetaTareaHtml).join("")
+        : `<p class="p-2 text-center text-[11px] text-gray-300">Sin tareas</p>`;
+    });
+
+    document.querySelectorAll(".tarea-card").forEach((card) => {
+      card.addEventListener("dragstart", (e) => {
+        e.dataTransfer.setData("text/plain", card.dataset.tareaId);
+        card.classList.add("opacity-40");
+      });
+      card.addEventListener("dragend", () => card.classList.remove("opacity-40"));
+      card.querySelector(".btn-borrar-tarea").addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (!confirm("¿Borrar esta tarea?")) return;
+        const { error } = await window.sb.from("tareas").delete().eq("id", card.dataset.tareaId);
+        if (error) return manejarError(error, "No se pudo borrar la tarea");
+        cargarTareas();
+        cargarProyecto();
+      });
+    });
+
+    document.querySelectorAll(".kanban-lista").forEach((lista) => {
+      lista.addEventListener("dragover", (e) => e.preventDefault());
+      lista.addEventListener("drop", async (e) => {
+        e.preventDefault();
+        const tareaId = e.dataTransfer.getData("text/plain");
+        const nuevoEstado = lista.dataset.estado;
+        const tarea = tareasCache.find((t) => t.id === tareaId);
+        if (!tarea || tarea.estado === nuevoEstado) return;
+        const { error } = await window.sb.from("tareas").update({ estado: nuevoEstado }).eq("id", tareaId);
+        if (error) return manejarError(error, "No se pudo mover la tarea");
+        cargarTareas();
+        cargarProyecto();
+      });
+    });
+  }
+
+  function renderGantt() {
+    const cont = document.getElementById("gantt-contenedor");
+    if (!cont) return;
+    const conFechas = tareasCache.filter((t) => t.fecha_inicio && t.fecha_fin);
+    if (!conFechas.length) {
+      cont.style.minWidth = "";
+      cont.innerHTML = `<p class="p-6 text-center text-sm text-gray-400">Asigna fecha de inicio y fin a tus tareas para verlas aquí.</p>`;
+      return;
+    }
+
+    const soloFecha = (f) => new Date(f + "T00:00:00");
+    const fechas = conFechas.flatMap((t) => [soloFecha(t.fecha_inicio), soloFecha(t.fecha_fin)]);
+    const minFecha = new Date(Math.min(...fechas));
+    minFecha.setDate(minFecha.getDate() - 2);
+    const maxFecha = new Date(Math.max(...fechas));
+    maxFecha.setDate(maxFecha.getDate() + 3);
+    const totalDias = Math.max(7, Math.round((maxFecha - minFecha) / 86400000));
+    const anchoTimeline = totalDias * GANTT_PX_POR_DIA;
+    const diasDesde = (fecha) => Math.round((soloFecha(fecha) - minFecha) / 86400000);
+
+    let reglaHtml = "";
+    for (let d = 0; d <= totalDias; d += 7) {
+      const fecha = new Date(minFecha);
+      fecha.setDate(fecha.getDate() + d);
+      reglaHtml += `<div class="absolute top-0 h-full border-l border-gray-100 text-[10px] text-gray-400" style="left:${d * GANTT_PX_POR_DIA}px">
+        <span class="pl-1">${fecha.toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit" })}</span>
+      </div>`;
+    }
+
+    const colorEstado = { hecho: "bg-green-500", en_progreso: "bg-blue-500", revision: "bg-amber-500", todo: "bg-gray-400" };
+
+    const filasHtml = conFechas
+      .map((t) => {
+        const left = diasDesde(t.fecha_inicio) * GANTT_PX_POR_DIA;
+        const width = Math.max(GANTT_PX_POR_DIA, (diasDesde(t.fecha_fin) - diasDesde(t.fecha_inicio) + 1) * GANTT_PX_POR_DIA);
+        return `
+        <div class="relative flex h-10 items-center border-t border-gray-50">
+          <div class="sticky left-0 z-10 w-[190px] shrink-0 truncate bg-white pr-2 text-xs font-medium text-gray-700">${escapeHtml(t.titulo)}</div>
+          <div class="relative h-full flex-1" style="min-width:${anchoTimeline}px">
+            <div class="gantt-barra absolute flex items-center overflow-hidden rounded-md px-2 text-[11px] font-medium text-white ${colorEstado[t.estado] || "bg-gray-400"}"
+              style="top:5px; left:${left}px; width:${width}px; height:30px;" data-tarea-id="${t.id}">
+              <span class="truncate">${escapeHtml(t.titulo)}</span>
+              <div class="gantt-resize absolute right-0 top-0 h-full w-2 cursor-ew-resize bg-black/10"></div>
+            </div>
+          </div>
+        </div>`;
+      })
+      .join("");
+
+    cont.style.minWidth = `${anchoTimeline + 190}px`;
+    cont.innerHTML = `
+      <div class="relative flex h-6">
+        <div class="sticky left-0 z-10 w-[190px] shrink-0 bg-white"></div>
+        <div class="relative h-6 flex-1" style="min-width:${anchoTimeline}px">${reglaHtml}</div>
+      </div>
+      ${filasHtml}`;
+
+    document.querySelectorAll(".gantt-barra").forEach((barra) => {
+      const resizeHandle = barra.querySelector(".gantt-resize");
+      barra.addEventListener("mousedown", (e) => {
+        if (e.target === resizeHandle) return;
+        ganttDragState = { tipo: "mover", tareaId: barra.dataset.tareaId, inicioX: e.clientX, leftOriginal: barra.offsetLeft };
+        e.preventDefault();
+      });
+      resizeHandle.addEventListener("mousedown", (e) => {
+        ganttDragState = { tipo: "resize", tareaId: barra.dataset.tareaId, inicioX: e.clientX, widthOriginal: barra.offsetWidth };
+        e.preventDefault();
+        e.stopPropagation();
+      });
+    });
+  }
+
+  // Un único listener global de mousemove/mouseup para todo el Gantt (evita
+  // acumular listeners en `document` cada vez que se vuelve a renderizar).
+  document.addEventListener("mousemove", (e) => {
+    if (!ganttDragState) return;
+    const barra = document.querySelector(`.gantt-barra[data-tarea-id="${ganttDragState.tareaId}"]`);
+    if (!barra) return;
+    const dx = e.clientX - ganttDragState.inicioX;
+    if (ganttDragState.tipo === "mover") {
+      barra.style.left = `${Math.max(0, ganttDragState.leftOriginal + dx)}px`;
+    } else {
+      barra.style.width = `${Math.max(GANTT_PX_POR_DIA, ganttDragState.widthOriginal + dx)}px`;
+    }
+  });
+
+  document.addEventListener("mouseup", async () => {
+    if (!ganttDragState) return;
+    const estado = ganttDragState;
+    ganttDragState = null;
+    const barra = document.querySelector(`.gantt-barra[data-tarea-id="${estado.tareaId}"]`);
+    const tarea = tareasCache.find((t) => t.id === estado.tareaId);
+    if (!barra || !tarea) return;
+
+    if (estado.tipo === "mover") {
+      const dx = parseInt(barra.style.left, 10) - estado.leftOriginal;
+      const diasMovidos = Math.round(dx / GANTT_PX_POR_DIA);
+      if (diasMovidos === 0) return;
+      const nuevaInicio = new Date(tarea.fecha_inicio + "T00:00:00");
+      nuevaInicio.setDate(nuevaInicio.getDate() + diasMovidos);
+      const nuevaFin = new Date(tarea.fecha_fin + "T00:00:00");
+      nuevaFin.setDate(nuevaFin.getDate() + diasMovidos);
+      const { error } = await window.sb
+        .from("tareas")
+        .update({ fecha_inicio: nuevaInicio.toISOString().slice(0, 10), fecha_fin: nuevaFin.toISOString().slice(0, 10) })
+        .eq("id", tarea.id);
+      if (error) manejarError(error, "No se pudo mover la tarea");
+      cargarTareas();
+    } else {
+      const dx = parseInt(barra.style.width, 10) - estado.widthOriginal;
+      const diasCambio = Math.round(dx / GANTT_PX_POR_DIA);
+      if (diasCambio === 0) return;
+      const nuevaFin = new Date(tarea.fecha_fin + "T00:00:00");
+      nuevaFin.setDate(nuevaFin.getDate() + diasCambio);
+      const inicio = new Date(tarea.fecha_inicio + "T00:00:00");
+      if (nuevaFin < inicio) return cargarTareas();
+      const { error } = await window.sb.from("tareas").update({ fecha_fin: nuevaFin.toISOString().slice(0, 10) }).eq("id", tarea.id);
+      if (error) manejarError(error, "No se pudo cambiar la duración");
+      cargarTareas();
+    }
+  });
+
+  function actualizarBotonesVistaTarea(vista) {
+    const kanbanBtn = document.getElementById("btn-vista-kanban");
+    const ganttBtn = document.getElementById("btn-vista-gantt");
+    kanbanBtn.classList.toggle("bg-white", vista === "kanban");
+    kanbanBtn.classList.toggle("shadow-sm", vista === "kanban");
+    kanbanBtn.classList.toggle("text-gray-800", vista === "kanban");
+    ganttBtn.classList.toggle("bg-white", vista === "gantt");
+    ganttBtn.classList.toggle("shadow-sm", vista === "gantt");
+    ganttBtn.classList.toggle("text-gray-800", vista === "gantt");
+  }
+  document.getElementById("btn-vista-kanban").addEventListener("click", () => {
+    document.getElementById("vista-kanban").classList.remove("hidden");
+    document.getElementById("vista-gantt").classList.add("hidden");
+    actualizarBotonesVistaTarea("kanban");
+  });
+  document.getElementById("btn-vista-gantt").addEventListener("click", () => {
+    document.getElementById("vista-kanban").classList.add("hidden");
+    document.getElementById("vista-gantt").classList.remove("hidden");
+    actualizarBotonesVistaTarea("gantt");
+  });
+  actualizarBotonesVistaTarea("kanban");
+
+  function abrirModalTarea() {
+    const opcionesPresupuesto = presupuestoCache
+      .map((pi) => `<option value="${pi.id}">${escapeHtml(pi.descripcion)} (${formatoMoneda(pi.valor_total)})</option>`)
+      .join("");
+    const html = `
+      <div id="modal-tarea" class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
+        <div class="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+          <h3 class="mb-4 text-base font-bold text-gray-900">Nueva Tarea</h3>
+          <div class="space-y-3">
+            <div>
+              <label class="mb-1 block text-xs font-medium text-gray-700">Título *</label>
+              <input id="t-titulo" class="w-full rounded-lg border-gray-300 text-sm" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium text-gray-700">Descripción</label>
+              <textarea id="t-descripcion" rows="2" class="w-full rounded-lg border-gray-300 text-sm"></textarea>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-700">Fecha inicio</label>
+                <input id="t-inicio" type="date" class="w-full rounded-lg border-gray-300 text-sm" />
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-700">Fecha fin</label>
+                <input id="t-fin" type="date" class="w-full rounded-lg border-gray-300 text-sm" />
+              </div>
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium text-gray-700">Renglón del presupuesto (define su peso en el % de avance)</label>
+              <select id="t-presupuesto-item" class="w-full rounded-lg border-gray-300 text-sm">
+                <option value="">— Ninguno (usar peso manual) —</option>
+                ${opcionesPresupuesto}
+              </select>
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium text-gray-700">Peso manual (si no eliges renglón)</label>
+              <input id="t-peso-manual" type="number" min="0" step="0.01" value="1" class="w-full rounded-lg border-gray-300 text-sm" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium text-gray-700">Estado</label>
+              <select id="t-estado" class="w-full rounded-lg border-gray-300 text-sm">
+                ${Object.entries(ESTADOS_TAREA)
+                  .map(([val, label]) => `<option value="${val}">${label}</option>`)
+                  .join("")}
+              </select>
+            </div>
+          </div>
+          <div class="mt-5 flex justify-end gap-2">
+            <button id="t-cancelar" class="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Cancelar</button>
+            <button id="t-guardar" class="rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700">Crear Tarea</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.insertAdjacentHTML("beforeend", html);
+    const cerrar = () => document.getElementById("modal-tarea").remove();
+    document.getElementById("t-cancelar").addEventListener("click", cerrar);
+    document.getElementById("t-guardar").addEventListener("click", async () => {
+      const titulo = document.getElementById("t-titulo").value.trim();
+      if (!titulo) return mostrarAviso("El título es obligatorio", "error");
+      const payload = {
+        proyecto_id: proyectoId,
+        titulo,
+        descripcion: document.getElementById("t-descripcion").value.trim() || null,
+        fecha_inicio: document.getElementById("t-inicio").value || null,
+        fecha_fin: document.getElementById("t-fin").value || null,
+        presupuesto_item_id: document.getElementById("t-presupuesto-item").value || null,
+        peso_manual: Number(document.getElementById("t-peso-manual").value || 1),
+        estado: document.getElementById("t-estado").value,
+        orden: tareasCache.length,
+      };
+      const { error } = await window.sb.from("tareas").insert(payload);
+      if (error) return manejarError(error, "No se pudo crear la tarea");
+      cerrar();
+      mostrarAviso("Tarea creada", "exito");
+      cargarTareas();
+      cargarProyecto();
+    });
+  }
+  document.getElementById("btn-nueva-tarea").addEventListener("click", () => abrirModalTarea());
+
+  // --------------------------------------------------------------------
+  // DOCUMENTOS
+  // --------------------------------------------------------------------
+  const CATEGORIAS_DOCUMENTO = {
+    contrato: "Contrato",
+    cotizacion: "Cotización",
+    orden_compra: "Orden de Compra",
+    planos: "Planos",
+    acta_entrega: "Acta de Entrega",
+    corte: "Corte",
+    otro: "Otro",
+  };
+  let documentosCache = [];
+  let filtroDocumentoCategoria = "";
+
+  function renderFiltroDocumentos() {
+    const cont = document.getElementById("filtro-documentos-categoria");
+    const opciones = [["", "Todos"], ...Object.entries(CATEGORIAS_DOCUMENTO)];
+    cont.innerHTML = opciones
+      .map(
+        ([val, label]) => `
+      <button class="btn-filtro-doc rounded-full border px-3 py-1 text-xs font-semibold ${
+        filtroDocumentoCategoria === val ? "border-primary bg-blue-50 text-primary" : "border-gray-300 text-gray-600 hover:bg-gray-50"
+      }" data-cat="${val}">${label}</button>`
+      )
+      .join("");
+    cont.querySelectorAll(".btn-filtro-doc").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        filtroDocumentoCategoria = btn.dataset.cat;
+        renderFiltroDocumentos();
+        renderTablaDocumentos();
+      })
+    );
+  }
+
+  function renderTablaDocumentos() {
+    const filtrados = filtroDocumentoCategoria ? documentosCache.filter((d) => d.categoria === filtroDocumentoCategoria) : documentosCache;
+    document.getElementById("tabla-documentos").innerHTML = filtrados.length
+      ? filtrados
+          .map(
+            (d) => `
+        <tr class="border-b border-gray-50 last:border-0">
+          <td class="px-4 py-2.5"><a href="${d.url}" target="_blank" rel="noopener" class="font-medium text-primary hover:underline">${escapeHtml(d.nombre_archivo)}</a></td>
+          <td class="px-4 py-2.5"><span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold">${CATEGORIAS_DOCUMENTO[d.categoria] || d.categoria}</span></td>
+          <td class="px-4 py-2.5 text-xs text-gray-500">${formatoFecha(d.created_at)}</td>
+          <td class="px-4 py-2.5 text-right">
+            <button class="btn-borrar-documento text-gray-400 hover:text-red-600" data-id="${d.id}">
+              <span class="material-symbols-outlined text-[18px]">delete</span>
+            </button>
+          </td>
+        </tr>`
+          )
+          .join("")
+      : `<tr><td class="px-4 py-6 text-center text-gray-400" colspan="4">No hay documentos en esta categoría.</td></tr>`;
+
+    document.querySelectorAll(".btn-borrar-documento").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        if (!confirm("¿Borrar este documento?")) return;
+        const { error } = await window.sb.from("documentos").delete().eq("id", btn.dataset.id);
+        if (error) return manejarError(error, "No se pudo borrar");
+        cargarDocumentos();
+      })
+    );
+  }
+
+  async function cargarDocumentos() {
+    const { data, error } = await window.sb
+      .from("documentos")
+      .select("*")
+      .eq("proyecto_id", proyectoId)
+      .order("created_at", { ascending: false });
+    if (error) return manejarError(error, "No se pudo cargar los documentos");
+    documentosCache = data || [];
+    renderFiltroDocumentos();
+    renderTablaDocumentos();
+  }
+
+  function abrirModalSubirDocumento(file) {
+    const opciones = Object.entries(CATEGORIAS_DOCUMENTO)
+      .map(([val, label]) => `<option value="${val}">${label}</option>`)
+      .join("");
+    const html = `
+      <div id="modal-documento" class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
+        <div class="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl">
+          <h3 class="mb-3 text-base font-bold text-gray-900">Subir Documento</h3>
+          <p class="mb-3 truncate text-sm text-gray-500">${escapeHtml(file.name)}</p>
+          <label class="mb-1 block text-xs font-medium text-gray-700">Categoría</label>
+          <select id="doc-categoria" class="mb-4 w-full rounded-lg border-gray-300 text-sm">${opciones}</select>
+          <div class="flex justify-end gap-2">
+            <button id="doc-cancelar" class="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Cancelar</button>
+            <button id="doc-subir" class="rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700">Subir</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.insertAdjacentHTML("beforeend", html);
+    const cerrar = () => {
+      document.getElementById("modal-documento")?.remove();
+      document.getElementById("input-subir-documento").value = "";
+    };
+    document.getElementById("doc-cancelar").addEventListener("click", cerrar);
+    document.getElementById("doc-subir").addEventListener("click", async () => {
+      const categoria = document.getElementById("doc-categoria").value;
+      const btn = document.getElementById("doc-subir");
+      btn.disabled = true;
+      btn.textContent = "Subiendo...";
+      const ruta = `${proyectoId}/${Date.now()}_${file.name}`;
+      const { error: errorSubida } = await window.sb.storage.from("documentos").upload(ruta, file, { upsert: true });
+      if (errorSubida) {
+        manejarError(errorSubida, "No se pudo subir el documento");
+        btn.disabled = false;
+        btn.textContent = "Subir";
+        return;
+      }
+      const { data: publicUrlData } = window.sb.storage.from("documentos").getPublicUrl(ruta);
+      const { error: errorInsert } = await window.sb.from("documentos").insert({
+        proyecto_id: proyectoId,
+        categoria,
+        nombre_archivo: file.name,
+        url: publicUrlData.publicUrl,
+        subido_por: session.user.id,
+      });
+      if (errorInsert) {
+        manejarError(errorInsert, "El archivo se subió pero no se pudo registrar en la base de datos");
+        btn.disabled = false;
+        btn.textContent = "Subir";
+        return;
+      }
+      mostrarAviso("Documento subido", "exito");
+      cerrar();
+      cargarDocumentos();
+    });
+  }
+
+  document.getElementById("input-subir-documento").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    abrirModalSubirDocumento(file);
+  });
+
+  // --------------------------------------------------------------------
   // Arranque
   // --------------------------------------------------------------------
   activarCamposMoneda();
@@ -1061,6 +1610,8 @@
     cargarProveedoresSelect().then(cargarCompras),
     cargarContratistasSelect().then(cargarContratistasProyecto),
     cargarCortesEjecucion(),
+    cargarTareas(),
+    cargarDocumentos(),
   ]);
 
   activarTab(qs("tab") || "resumen");

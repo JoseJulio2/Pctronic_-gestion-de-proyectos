@@ -81,22 +81,30 @@ function qs(name) {
 }
 
 // ============================================================================
-// Campos de dinero con separador de miles (ej. "1.250.000") pero que
-// devuelven un número plano. Uso:
-//   <input class="input-moneda" inputmode="numeric" />
+// Campos de dinero con separador de miles (ej. "1.250.000,50") que aceptan
+// decimales (con coma) y devuelven un número plano. Uso:
+//   <input class="input-moneda" inputmode="decimal" />
 //   activarCamposMoneda(); // una vez, después de insertar el HTML
 //   valorMoneda(inputEl);  // para leer el número actual
 // ============================================================================
 
 function formatearMiles(valorNumerico) {
   const n = Number(valorNumerico || 0);
-  return n.toLocaleString("es-CO", { maximumFractionDigits: 0 });
+  return n.toLocaleString("es-CO", { maximumFractionDigits: 2 });
 }
 
+// Convierte lo que el usuario escribió (con puntos de miles y coma decimal
+// opcional, ej. "1.500.000,25") a un número JS normal (1500000.25).
 function valorMoneda(inputEl) {
   if (!inputEl) return 0;
-  const soloDigitos = String(inputEl.value || "").replace(/[^\d]/g, "");
-  return soloDigitos ? Number(soloDigitos) : 0;
+  let texto = String(inputEl.value || "").trim();
+  if (!texto) return 0;
+  const partes = texto.split(",");
+  const parteEntera = (partes[0] || "").replace(/[^\d]/g, "");
+  const parteDecimal = partes.length > 1 ? partes[1].replace(/[^\d]/g, "") : "";
+  const normalizado = parteEntera + (parteDecimal ? "." + parteDecimal : "");
+  const n = Number(normalizado);
+  return isNaN(n) ? 0 : n;
 }
 
 function establecerValorMoneda(inputEl, valorNumerico) {
@@ -104,13 +112,26 @@ function establecerValorMoneda(inputEl, valorNumerico) {
   inputEl.value = valorNumerico ? formatearMiles(valorNumerico) : "";
 }
 
+// Reformatea en vivo lo que el usuario está escribiendo, conservando la coma
+// decimal (hasta 2 decimales) mientras le pone puntos de miles a la parte entera.
+function formatearWhileTyping(texto) {
+  let limpio = String(texto || "").replace(/[^\d,]/g, "");
+  const primeraComa = limpio.indexOf(",");
+  if (primeraComa !== -1) {
+    limpio = limpio.slice(0, primeraComa + 1) + limpio.slice(primeraComa + 1).replace(/,/g, "");
+  }
+  const [entero, decimal] = limpio.split(",");
+  const enteroFormateado = entero ? Number(entero).toLocaleString("es-CO", { maximumFractionDigits: 0 }) : "";
+  if (decimal === undefined) return enteroFormateado;
+  return `${enteroFormateado},${decimal.slice(0, 2)}`;
+}
+
 function activarCamposMoneda(selector = ".input-moneda", contenedor = document) {
   contenedor.querySelectorAll(selector).forEach((input) => {
     if (input.dataset.moneyBound) return;
     input.dataset.moneyBound = "1";
     input.addEventListener("input", () => {
-      const num = valorMoneda(input);
-      input.value = num ? formatearMiles(num) : "";
+      input.value = formatearWhileTyping(input.value);
     });
   });
 }

@@ -21,10 +21,13 @@
     render();
   }
 
+  let ultimasFiltradas = [];
+
   function render() {
     const texto = document.getElementById("filtro-busqueda").value.trim().toLowerCase();
     const estado = document.getElementById("filtro-estado").value;
     const empresaId = document.getElementById("filtro-empresa").value;
+    const mes = document.getElementById("filtro-mes").value; // "YYYY-MM" o ""
 
     const filtradas = cache.filter((f) => {
       const coincideTexto =
@@ -33,8 +36,10 @@
         (f.numero_factura || "").toLowerCase().includes(texto);
       const coincideEstado = !estado || f.estado === estado;
       const coincideEmpresa = !empresaId || f.proyectos?.empresa_id === empresaId;
-      return coincideTexto && coincideEstado && coincideEmpresa;
+      const coincideMes = !mes || String(f.fecha_emision || "").slice(0, 7) === mes;
+      return coincideTexto && coincideEstado && coincideEmpresa && coincideMes;
     });
+    ultimasFiltradas = filtradas;
 
     const total = filtradas.reduce((a, f) => a + Number(f.valor), 0);
     const pagado = filtradas.filter((f) => f.estado === "pagada").reduce((a, f) => a + Number(f.valor), 0);
@@ -68,6 +73,36 @@
   document.getElementById("filtro-busqueda").addEventListener("input", render);
   document.getElementById("filtro-estado").addEventListener("change", render);
   document.getElementById("filtro-empresa").addEventListener("change", render);
+  document.getElementById("filtro-mes").addEventListener("change", render);
+
+  const COLUMNAS_EXPORT = ["Empresa", "Proyecto", "N° Factura", "Emisión", "Vencimiento", "Valor", "Estado"];
+  function filasExport() {
+    return ultimasFiltradas.map((f) => [
+      f.proyectos?.empresas?.nombre || "—",
+      f.proyectos?.nombre || "—",
+      f.numero_factura || "—",
+      formatoFecha(f.fecha_emision),
+      formatoFecha(f.fecha_vencimiento),
+      formatoMoneda(f.valor),
+      (ESTADOS_FACTURA[f.estado] || {}).label || f.estado,
+    ]);
+  }
+
+  document.getElementById("btn-exportar-excel").addEventListener("click", () => {
+    if (!ultimasFiltradas.length) return mostrarAviso("No hay facturas para exportar con este filtro", "error");
+    descargarPlantillaExcel("facturacion.xlsx", COLUMNAS_EXPORT, filasExport());
+  });
+  document.getElementById("btn-exportar-pdf").addEventListener("click", () => {
+    if (!ultimasFiltradas.length) return mostrarAviso("No hay facturas para exportar con este filtro", "error");
+    const mes = document.getElementById("filtro-mes").value;
+    generarPdfTabla({
+      titulo: "Facturación",
+      subtitulo: mes ? `Mes: ${mes}` : "Todas las fechas",
+      columnas: COLUMNAS_EXPORT,
+      filas: filasExport(),
+      nombreArchivo: "facturacion.pdf",
+    });
+  });
 
   await cargarEmpresasFiltro();
   cargar();

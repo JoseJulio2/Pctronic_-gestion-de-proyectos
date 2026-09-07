@@ -16,10 +16,13 @@
 <link rel="stylesheet" href="assets/css/styles.css" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="assets/js/config.js"></script>
 <script src="assets/js/supabaseClient.js"></script>
 <script src="assets/js/util.js"></script>
 <script src="assets/js/excel.js"></script>
+<script src="assets/js/pdf.js"></script>
 </head>
 <body data-page="proyectos" data-title="Detalle del Proyecto" class="font-display bg-gray-50 text-gray-900 antialiased">
 
@@ -42,16 +45,17 @@
       <nav class="-mb-px flex gap-6 overflow-x-auto text-sm font-medium" id="tabs-nav">
         <button data-tab="resumen" class="tab-btn whitespace-nowrap border-b-2 px-1 py-3">Resumen</button>
         <button data-tab="presupuesto" class="tab-btn whitespace-nowrap border-b-2 px-1 py-3">Presupuesto</button>
-        <button data-tab="ejecucion" class="tab-btn whitespace-nowrap border-b-2 px-1 py-3">Ejecución</button>
+        <button data-tab="tareas" class="tab-btn whitespace-nowrap border-b-2 px-1 py-3">Ejecución (Tareas)</button>
+        <button data-tab="cortes" class="tab-btn whitespace-nowrap border-b-2 px-1 py-3">Cortes</button>
         <button data-tab="facturacion" class="tab-btn whitespace-nowrap border-b-2 px-1 py-3">Facturación</button>
         <button data-tab="compras" class="tab-btn whitespace-nowrap border-b-2 px-1 py-3">Compras</button>
-        <button data-tab="contratistas" class="tab-btn whitespace-nowrap border-b-2 px-1 py-3">Contratistas</button>
+        <button data-tab="documentos" class="tab-btn whitespace-nowrap border-b-2 px-1 py-3">Documentos</button>
       </nav>
     </div>
 
     <!-- RESUMEN -->
     <section data-tab-panel="resumen" class="space-y-4">
-      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4" id="resumen-kpis"></div>
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5" id="resumen-kpis"></div>
       <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div class="rounded-xl border border-gray-200 bg-white p-5">
           <h3 class="mb-3 font-bold text-gray-900">Información General</h3>
@@ -66,26 +70,42 @@
 
     <!-- PRESUPUESTO -->
     <section data-tab-panel="presupuesto" class="hidden space-y-4">
-      <div class="grid grid-cols-1 gap-4 sm:grid-cols-5" id="presu-kpis">
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-3 lg:grid-cols-6" id="presu-kpis">
         <div class="rounded-xl border border-gray-200 bg-white p-4">
           <p class="text-xs font-medium text-gray-500">Mano de Obra (MO)</p>
           <p class="text-lg font-bold" id="presu-total-mo">$ 0</p>
+          <div class="barra-progreso mt-2"><span id="presu-pct-mo" style="width:0%"></span></div>
+          <p class="mt-1 text-[11px] text-gray-400"><span id="presu-pct-mo-txt">0%</span> gastado</p>
         </div>
         <div class="rounded-xl border border-gray-200 bg-white p-4">
           <p class="text-xs font-medium text-gray-500">Materiales (MP)</p>
           <p class="text-lg font-bold" id="presu-total-mp">$ 0</p>
+          <div class="barra-progreso mt-2"><span id="presu-pct-mp" style="width:0%"></span></div>
+          <p class="mt-1 text-[11px] text-gray-400"><span id="presu-pct-mp-txt">0%</span> gastado</p>
         </div>
         <div class="rounded-xl border border-gray-200 bg-white p-4">
           <p class="text-xs font-medium text-gray-500">Equipos</p>
           <p class="text-lg font-bold" id="presu-total-equipo">$ 0</p>
+          <div class="barra-progreso mt-2"><span id="presu-pct-equipo" style="width:0%"></span></div>
+          <p class="mt-1 text-[11px] text-gray-400"><span id="presu-pct-equipo-txt">0%</span> gastado</p>
         </div>
         <div class="rounded-xl border border-gray-200 bg-white p-4">
           <p class="text-xs font-medium text-gray-500">Alquileres</p>
           <p class="text-lg font-bold" id="presu-total-alquiler">$ 0</p>
+          <div class="barra-progreso mt-2"><span id="presu-pct-alquiler" style="width:0%"></span></div>
+          <p class="mt-1 text-[11px] text-gray-400"><span id="presu-pct-alquiler-txt">0%</span> gastado</p>
+        </div>
+        <div class="rounded-xl border border-gray-200 bg-white p-4">
+          <p class="text-xs font-medium text-gray-500">Otros</p>
+          <p class="text-lg font-bold" id="presu-total-otro">$ 0</p>
+          <div class="barra-progreso mt-2"><span id="presu-pct-otro" style="width:0%"></span></div>
+          <p class="mt-1 text-[11px] text-gray-400"><span id="presu-pct-otro-txt">0%</span> gastado</p>
         </div>
         <div class="rounded-xl border border-primary/30 bg-blue-50 p-4">
           <p class="text-xs font-medium text-primary">Costo Total Estimado</p>
           <p class="text-lg font-bold text-primary" id="presu-total-general">$ 0</p>
+          <div class="barra-progreso mt-2"><span id="presu-pct-general" style="width:0%"></span></div>
+          <p class="mt-1 text-[11px] text-primary"><span id="presu-pct-general-txt">0%</span> del presupuesto ejecutado</p>
         </div>
       </div>
 
@@ -124,7 +144,7 @@
         </div>
         <div class="sm:col-span-2">
           <label class="mb-1 block text-xs font-medium text-gray-700">Vlr. Unitario</label>
-          <input id="item-valor" class="input-moneda w-full rounded-lg border-gray-300 text-sm" inputmode="numeric" value="0" />
+          <input id="item-valor" class="input-moneda w-full rounded-lg border-gray-300 text-sm" inputmode="decimal" value="0" />
         </div>
         <div class="sm:col-span-2">
           <label class="mb-1 block text-xs font-medium text-gray-700">Contratista</label>
@@ -160,15 +180,84 @@
       </div>
     </section>
 
-    <!-- EJECUCIÓN -->
-    <section data-tab-panel="ejecucion" class="hidden space-y-4">
-      <div class="flex items-center justify-between">
-        <p class="text-sm text-gray-500">Registra por corte lo realmente avanzado/instalado. Esas cantidades alimentan a la vez la factura al cliente y el pago al contratista.</p>
-        <button id="btn-nuevo-corte" class="flex shrink-0 items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
-          <span class="material-symbols-outlined text-[18px]">add</span> Nuevo Corte
-        </button>
+    <!-- TAREAS (Ejecución estilo Asana: Kanban + Gantt, alimenta el % de avance) -->
+    <section data-tab-panel="tareas" class="hidden space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p class="text-sm text-gray-500">Cada tarea se puede vincular a un renglón del presupuesto: su peso en el % de avance es el valor de venta de ese renglón (o un peso manual). El avance del proyecto se recalcula solo.</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="flex rounded-lg border border-gray-300 p-0.5 text-xs font-semibold">
+            <button id="btn-vista-kanban" class="rounded-md px-3 py-1.5">Tablero</button>
+            <button id="btn-vista-gantt" class="rounded-md px-3 py-1.5">Gantt</button>
+          </div>
+          <button id="btn-nueva-tarea" class="flex shrink-0 items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+            <span class="material-symbols-outlined text-[18px]">add</span> Nueva Tarea
+          </button>
+        </div>
       </div>
-      <div id="lista-cortes" class="space-y-3"></div>
+
+      <!-- Vista Kanban -->
+      <div id="vista-kanban" class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div class="rounded-xl border border-gray-200 bg-gray-50 p-3" data-columna="todo">
+          <p class="mb-2 text-xs font-bold uppercase text-gray-500">Por Hacer</p>
+          <div class="kanban-lista min-h-[80px] space-y-2" data-estado="todo"></div>
+        </div>
+        <div class="rounded-xl border border-gray-200 bg-gray-50 p-3" data-columna="en_progreso">
+          <p class="mb-2 text-xs font-bold uppercase text-blue-600">En Progreso</p>
+          <div class="kanban-lista min-h-[80px] space-y-2" data-estado="en_progreso"></div>
+        </div>
+        <div class="rounded-xl border border-gray-200 bg-gray-50 p-3" data-columna="revision">
+          <p class="mb-2 text-xs font-bold uppercase text-amber-600">Revisión</p>
+          <div class="kanban-lista min-h-[80px] space-y-2" data-estado="revision"></div>
+        </div>
+        <div class="rounded-xl border border-gray-200 bg-gray-50 p-3" data-columna="hecho">
+          <p class="mb-2 text-xs font-bold uppercase text-green-600">Hecho</p>
+          <div class="kanban-lista min-h-[80px] space-y-2" data-estado="hecho"></div>
+        </div>
+      </div>
+
+      <!-- Vista Gantt -->
+      <div id="vista-gantt" class="hidden overflow-x-auto rounded-xl border border-gray-200 bg-white p-4">
+        <div id="gantt-contenedor" class="relative"></div>
+        <p class="mt-3 text-xs text-gray-400">Arrastra una barra para mover sus fechas; arrastra su borde derecho para cambiar la duración.</p>
+      </div>
+    </section>
+
+    <!-- CORTES (corte de obra + corte de contratista) -->
+    <section data-tab-panel="cortes" class="hidden space-y-6">
+      <div>
+        <div class="mb-2 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 class="font-bold text-gray-900">Corte de Obra</h3>
+            <p class="text-sm text-gray-500">Cantidades iniciales (presupuesto), ejecutadas y pendientes por corte. Alimenta la factura al cliente y, automáticamente, el corte de cada contratista.</p>
+          </div>
+          <button id="btn-nuevo-corte" class="flex shrink-0 items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+            <span class="material-symbols-outlined text-[18px]">add</span> Nuevo Corte de Obra
+          </button>
+        </div>
+        <div id="lista-cortes" class="space-y-3"></div>
+      </div>
+
+      <div class="border-t border-gray-100 pt-6">
+        <h3 class="mb-1 font-bold text-gray-900">Corte de Contratista</h3>
+        <p class="mb-3 text-sm text-gray-500">Vincula contratistas a este proyecto; sus cortes de pago se generan automáticamente desde el Corte de Obra (mismo cálculo de ejecución) y puedes editarlos aquí.</p>
+        <form id="form-contratista" class="grid grid-cols-1 gap-3 rounded-xl border border-gray-200 bg-white p-4 sm:grid-cols-12 sm:items-end">
+          <div class="sm:col-span-6">
+            <label class="mb-1 block text-xs font-medium text-gray-700">Contratista / Cuadrilla</label>
+            <select id="contratista-select" class="w-full rounded-lg border-gray-300 text-sm"></select>
+          </div>
+          <div class="sm:col-span-3">
+            <label class="mb-1 block text-xs font-medium text-gray-700">Valor Contratado</label>
+            <input id="contratista-valor" class="input-moneda w-full rounded-lg border-gray-300 text-sm" inputmode="decimal" />
+          </div>
+          <div class="sm:col-span-3">
+            <button class="w-full rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">+ Vincular</button>
+          </div>
+        </form>
+
+        <div id="lista-contratistas" class="mt-3 space-y-3"></div>
+      </div>
     </section>
 
     <!-- FACTURACIÓN -->
@@ -195,7 +284,7 @@
         </div>
         <div class="sm:col-span-2">
           <label class="mb-1 block text-xs font-medium text-gray-700">Valor</label>
-          <input id="factura-valor" class="input-moneda w-full rounded-lg border-gray-300 text-sm" inputmode="numeric" />
+          <input id="factura-valor" class="input-moneda w-full rounded-lg border-gray-300 text-sm" inputmode="decimal" />
         </div>
         <div class="sm:col-span-2">
           <label class="mb-1 block text-xs font-medium text-gray-700">Emisión</label>
@@ -253,9 +342,10 @@
         <div class="sm:col-span-2">
           <label class="mb-1 block text-xs font-medium text-gray-700">Categoría</label>
           <select id="compra-categoria" class="w-full rounded-lg border-gray-300 text-sm">
-            <option value="materiales">Materiales</option>
-            <option value="mano_obra">Mano de Obra</option>
             <option value="equipos">Equipos</option>
+            <option value="mano_obra">Mano de Obra</option>
+            <option value="materiales">Materiales</option>
+            <option value="alquiler">Alquiler</option>
             <option value="otros">Otros</option>
           </select>
         </div>
@@ -265,7 +355,7 @@
         </div>
         <div class="sm:col-span-1">
           <label class="mb-1 block text-xs font-medium text-gray-700">Vlr. antes IVA</label>
-          <input id="compra-valor" class="input-moneda w-full rounded-lg border-gray-300 text-sm" inputmode="numeric" />
+          <input id="compra-valor" class="input-moneda w-full rounded-lg border-gray-300 text-sm" inputmode="decimal" />
         </div>
         <div class="sm:col-span-1">
           <label class="mb-1 block text-xs font-medium text-gray-700">IVA %</label>
@@ -297,23 +387,29 @@
       </div>
     </section>
 
-    <!-- CONTRATISTAS -->
-    <section data-tab-panel="contratistas" class="hidden space-y-4">
-      <form id="form-contratista" class="grid grid-cols-1 gap-3 rounded-xl border border-gray-200 bg-white p-4 sm:grid-cols-12 sm:items-end">
-        <div class="sm:col-span-6">
-          <label class="mb-1 block text-xs font-medium text-gray-700">Contratista / Cuadrilla</label>
-          <select id="contratista-select" class="w-full rounded-lg border-gray-300 text-sm"></select>
-        </div>
-        <div class="sm:col-span-3">
-          <label class="mb-1 block text-xs font-medium text-gray-700">Valor Contratado</label>
-          <input id="contratista-valor" class="input-moneda w-full rounded-lg border-gray-300 text-sm" inputmode="numeric" />
-        </div>
-        <div class="sm:col-span-3">
-          <button class="w-full rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">+ Vincular</button>
-        </div>
-      </form>
-
-      <div id="lista-contratistas" class="space-y-3"></div>
+    <!-- DOCUMENTOS -->
+    <section data-tab-panel="documentos" class="hidden space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <p class="text-sm text-gray-500">Contratos, cotizaciones, órdenes de compra, planos, actas de entrega, cortes y demás archivos del proyecto.</p>
+        <label class="flex cursor-pointer items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+          <span class="material-symbols-outlined text-[18px]">upload</span> Subir Documento
+          <input type="file" id="input-subir-documento" class="hidden" />
+        </label>
+      </div>
+      <div class="flex flex-wrap gap-2" id="filtro-documentos-categoria"></div>
+      <div class="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+        <table class="w-full text-left text-sm">
+          <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+            <tr>
+              <th class="px-4 py-3">Archivo</th>
+              <th class="px-4 py-3">Categoría</th>
+              <th class="px-4 py-3">Subido</th>
+              <th class="px-4 py-3"></th>
+            </tr>
+          </thead>
+          <tbody id="tabla-documentos"></tbody>
+        </table>
+      </div>
     </section>
   </main>
 </div>

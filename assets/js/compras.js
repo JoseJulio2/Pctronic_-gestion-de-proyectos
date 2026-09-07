@@ -2,7 +2,8 @@
   await window.pctronicReady;
 
   let cache = [];
-  const etiquetaCat = { materiales: "Materiales", mano_obra: "Mano de Obra", equipos: "Equipos", otros: "Otros" };
+  let ultimasFiltradas = [];
+  const etiquetaCat = { equipos: "Equipos", mano_obra: "Mano de Obra", materiales: "Materiales", alquiler: "Alquiler", otros: "Otros" };
 
   const ahora = new Date();
   document.getElementById("kpi-mes-label").textContent =
@@ -22,6 +23,7 @@
   function render() {
     const texto = document.getElementById("filtro-busqueda").value.trim().toLowerCase();
     const categoria = document.getElementById("filtro-categoria").value;
+    const mes = document.getElementById("filtro-mes").value; // "YYYY-MM" o ""
 
     const filtradas = cache.filter((c) => {
       const coincideTexto =
@@ -29,8 +31,10 @@
         (c.proyectos?.nombre || "").toLowerCase().includes(texto) ||
         (c.descripcion || "").toLowerCase().includes(texto);
       const coincideCategoria = !categoria || c.categoria === categoria;
-      return coincideTexto && coincideCategoria;
+      const coincideMes = !mes || String(c.fecha || "").slice(0, 7) === mes;
+      return coincideTexto && coincideCategoria && coincideMes;
     });
+    ultimasFiltradas = filtradas;
 
     document.getElementById("kpi-total").textContent = formatoMoneda(
       filtradas.reduce((a, c) => a + Number(c.valor), 0)
@@ -74,6 +78,35 @@
 
   document.getElementById("filtro-busqueda").addEventListener("input", render);
   document.getElementById("filtro-categoria").addEventListener("change", render);
+  document.getElementById("filtro-mes").addEventListener("change", render);
+
+  const COLUMNAS_EXPORT = ["Proyecto", "Descripción", "Proveedor", "Categoría", "Fecha", "Valor"];
+  function filasExport() {
+    return ultimasFiltradas.map((c) => [
+      c.proyectos?.nombre || "—",
+      c.descripcion || "",
+      c.proveedores?.nombre || "—",
+      etiquetaCat[c.categoria] || c.categoria,
+      formatoFecha(c.fecha),
+      formatoMoneda(c.valor),
+    ]);
+  }
+
+  document.getElementById("btn-exportar-excel").addEventListener("click", () => {
+    if (!ultimasFiltradas.length) return mostrarAviso("No hay compras para exportar con este filtro", "error");
+    descargarPlantillaExcel("compras.xlsx", COLUMNAS_EXPORT, filasExport());
+  });
+  document.getElementById("btn-exportar-pdf").addEventListener("click", () => {
+    if (!ultimasFiltradas.length) return mostrarAviso("No hay compras para exportar con este filtro", "error");
+    const mes = document.getElementById("filtro-mes").value;
+    generarPdfTabla({
+      titulo: "Compras y Costos",
+      subtitulo: mes ? `Mes: ${mes}` : "Todas las fechas",
+      columnas: COLUMNAS_EXPORT,
+      filas: filasExport(),
+      nombreArchivo: "compras.pdf",
+    });
+  });
 
   cargar();
 })();

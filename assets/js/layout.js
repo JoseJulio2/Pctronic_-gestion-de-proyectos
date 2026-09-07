@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { page: "proyectos", href: "proyectos.html", icon: "folder_open", label: "Proyectos" },
   { page: "facturacion", href: "facturacion.html", icon: "receipt_long", label: "Facturación" },
   { page: "compras", href: "compras.html", icon: "shopping_cart", label: "Compras y Costos" },
+  { page: "suministros", href: "suministros.html", icon: "inventory_2", label: "Suministros" },
   { page: "clientes", href: "clientes.html", icon: "groups", label: "Clientes" },
   { page: "contratistas", href: "contratistas.html", icon: "engineering", label: "Contratistas" },
   { page: "proveedores", href: "proveedores.html", icon: "local_shipping", label: "Proveedores" },
@@ -34,35 +35,77 @@ function renderSidebar(activePage) {
       .map((item) => {
         const active = item.page === activePage;
         return `
-        <a href="${item.href}"
+        <a href="${item.href}" title="${escapeHtml(item.label)}"
            class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
              ${active ? "bg-blue-50 text-primary" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"}">
-          <span class="material-symbols-outlined text-[20px]">${item.icon}</span>
-          ${item.label}
+          <span class="material-symbols-outlined shrink-0 text-[20px]">${item.icon}</span>
+          <span class="nav-label truncate">${item.label}</span>
         </a>`;
       })
       .join("");
 
   return `
-  <aside class="fixed inset-y-0 left-0 z-30 flex w-64 flex-col border-r border-gray-200 bg-white">
+  <aside id="app-aside" class="fixed inset-y-0 left-0 z-30 flex w-64 flex-col border-r border-gray-200 bg-white transition-[width] duration-150">
     <div class="flex items-center gap-3 px-5 py-5 border-b border-gray-100">
       ${logoSvg()}
-      <div class="leading-tight">
+      <div class="sidebar-brand-text leading-tight">
         <p class="text-sm font-bold text-gray-900">Pctronic</p>
         <p class="text-xs text-gray-500">Seguridad Electrónica</p>
       </div>
     </div>
-    <nav class="flex-1 space-y-1 overflow-y-auto px-3 py-4" id="nav-links">
+    <nav class="flex-1 space-y-1 overflow-y-auto overflow-x-hidden px-3 py-4" id="nav-links">
       ${linksHtml(items)}
       <div id="nav-admin-slot"></div>
     </nav>
-    <div class="border-t border-gray-100 p-3">
-      <button id="btn-logout" class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900">
-        <span class="material-symbols-outlined text-[20px]">logout</span>
-        Cerrar Sesión
+    <div class="border-t border-gray-100 p-3 space-y-1">
+      <button id="btn-toggle-sidebar" title="Ocultar / mostrar barra lateral"
+        class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900">
+        <span class="material-symbols-outlined shrink-0 text-[20px]" id="btn-toggle-sidebar-icon">chevron_left</span>
+        <span class="nav-label truncate">Ocultar barra</span>
+      </button>
+      <button id="btn-logout" title="Cerrar Sesión"
+        class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900">
+        <span class="material-symbols-outlined shrink-0 text-[20px]">logout</span>
+        <span class="nav-label truncate">Cerrar Sesión</span>
       </button>
     </div>
   </aside>`;
+}
+
+// --------------------------------------------------------------------
+// Colapsar / mostrar la barra lateral (se recuerda entre sesiones).
+// --------------------------------------------------------------------
+const SIDEBAR_COLLAPSE_KEY = "pctronic_sidebar_colapsado";
+
+function sidebarColapsadaGuardada() {
+  try {
+    return localStorage.getItem(SIDEBAR_COLLAPSE_KEY) === "1";
+  } catch (e) {
+    return false;
+  }
+}
+
+function guardarEstadoSidebar(colapsada) {
+  try {
+    localStorage.setItem(SIDEBAR_COLLAPSE_KEY, colapsada ? "1" : "0");
+  } catch (e) {
+    /* almacenamiento no disponible; no es crítico */
+  }
+}
+
+function aplicarEstadoSidebar(colapsada) {
+  const aside = document.getElementById("app-aside");
+  const wrapper = document.querySelector(".lg\\:pl-64");
+  if (!aside) return;
+  aside.classList.toggle("w-64", !colapsada);
+  aside.classList.toggle("w-[72px]", colapsada);
+  if (wrapper) {
+    wrapper.classList.toggle("lg:pl-64", !colapsada);
+    wrapper.classList.toggle("lg:pl-[72px]", colapsada);
+  }
+  aside.querySelectorAll(".nav-label, .sidebar-brand-text").forEach((el) => el.classList.toggle("hidden", colapsada));
+  const icono = document.getElementById("btn-toggle-sidebar-icon");
+  if (icono) icono.textContent = colapsada ? "chevron_right" : "chevron_left";
 }
 
 function renderTopbar(titulo) {
@@ -103,6 +146,17 @@ async function inicializarApp() {
   const topbarEl = document.getElementById("app-topbar");
   if (sidebarEl) sidebarEl.innerHTML = renderSidebar(page);
   if (topbarEl) topbarEl.innerHTML = renderTopbar(titulo);
+
+  let colapsada = sidebarColapsadaGuardada();
+  aplicarEstadoSidebar(colapsada);
+  const btnToggleSidebar = document.getElementById("btn-toggle-sidebar");
+  if (btnToggleSidebar) {
+    btnToggleSidebar.addEventListener("click", () => {
+      colapsada = !colapsada;
+      aplicarEstadoSidebar(colapsada);
+      guardarEstadoSidebar(colapsada);
+    });
+  }
 
   let profile = null;
   try {

@@ -49,6 +49,20 @@
 
   await Promise.all([cargarEmpresas(), cargarClientes(), cargarContratistas()]);
 
+  // --------------------------------------------------------------------
+  // Ejecutor del proyecto: personal propio vs. contratista principal
+  // --------------------------------------------------------------------
+  const selectEjecutorTipo = document.getElementById("ejecutor_tipo");
+  const bloqueContratistaPrincipal = document.getElementById("bloque-contratista-principal");
+  const selectContratistaPrincipal = document.getElementById("contratista_principal_id");
+  selectContratistaPrincipal.innerHTML = opcionesContratistaHtml(null);
+
+  function actualizarBloqueEjecutor() {
+    bloqueContratistaPrincipal.classList.toggle("hidden", selectEjecutorTipo.value !== "contratista");
+  }
+  selectEjecutorTipo.addEventListener("change", actualizarBloqueEjecutor);
+  actualizarBloqueEjecutor();
+
   // Modal de cliente rápido
   const modal = document.getElementById("modal-cliente");
   document.getElementById("btn-nuevo-cliente").addEventListener("click", () => {
@@ -93,22 +107,26 @@
 
   function actualizarBloquesContrato() {
     const tipo = tipoContratoActual();
-    bloqueIva.classList.toggle("hidden", tipo !== "iva");
+    // El bloque de IVA se mantiene siempre visible: en AIU el IVA aplica
+    // solo sobre la Utilidad, así que sigue siendo necesario.
     bloqueAiu.classList.toggle("hidden", tipo !== "aiu");
+    document.getElementById("label-iva").textContent = tipo === "aiu" ? "IVA sobre la Utilidad (%)" : "IVA (%)";
+    document.getElementById("nota-iva-aiu").classList.toggle("hidden", tipo !== "aiu");
     actualizarPreviewContrato();
   }
 
   function actualizarPreviewContrato() {
     const tipo = tipoContratoActual();
     const base = valorMoneda(document.getElementById("valor_antes_impuestos"));
+    const iva = Number(document.getElementById("iva_porcentaje").value || 0);
     let total;
     if (tipo === "aiu") {
       const admin = Number(document.getElementById("administracion_porcentaje").value || 0);
       const imprev = Number(document.getElementById("imprevistos_porcentaje").value || 0);
       const util = Number(document.getElementById("utilidad_porcentaje").value || 0);
-      total = base * (1 + (admin + imprev + util) / 100);
+      // valor_total = base*(1+(A+I+U)/100) + base*(U/100)*(IVA/100)  → IVA solo sobre la Utilidad.
+      total = base * (1 + (admin + imprev + util) / 100) + base * (util / 100) * (iva / 100);
     } else {
-      const iva = Number(document.getElementById("iva_porcentaje").value || 0);
       total = base * (1 + iva / 100);
     }
     document.getElementById("preview-valor-total").textContent = formatoMoneda(total);
@@ -246,6 +264,9 @@
       cliente_id: selectCliente.value || null,
       tipo_proyecto: tiposSeleccionados,
       estado: document.getElementById("estado").value,
+      numero_contrato: document.getElementById("numero_contrato").value.trim() || null,
+      ejecutor_tipo: selectEjecutorTipo.value,
+      contratista_principal_id: selectEjecutorTipo.value === "contratista" ? selectContratistaPrincipal.value || null : null,
       fecha_contrato: document.getElementById("fecha_contrato").value || null,
       fecha_inicio: document.getElementById("fecha_inicio").value || null,
       fecha_fin_estimada: document.getElementById("fecha_fin_estimada").value || null,
