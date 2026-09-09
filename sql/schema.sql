@@ -16,6 +16,9 @@ create extension if not exists "pgcrypto";
 -- ----------------------------------------------------------------------------
 -- 0. LIMPIEZA PREVIA
 -- ----------------------------------------------------------------------------
+drop table if exists public.suministros cascade;
+drop table if exists public.tareas cascade;
+drop table if exists public.documentos cascade;
 drop table if exists public.ejecucion_generaciones cascade;
 drop table if exists public.ejecucion_items cascade;
 drop table if exists public.ejecucion_cortes cascade;
@@ -24,6 +27,7 @@ drop table if exists public.proyecto_contratistas cascade;
 drop table if exists public.compras cascade;
 drop table if exists public.facturas cascade;
 drop table if exists public.presupuesto_items cascade;
+drop table if exists public.cotizacion_items cascade;
 drop table if exists public.proyectos cascade;
 drop table if exists public.clientes_contactos cascade;
 drop table if exists public.proveedores_contactos cascade;
@@ -221,15 +225,46 @@ create table public.proyectos (
 );
 
 -- ----------------------------------------------------------------------------
--- 7. PRESUPUESTO (con categoría Equipos y vínculo opcional a un contratista)
+-- 6B. COTIZACIÓN DEL PROYECTO (lado venta — la oferta con la que se contrató)
 -- ----------------------------------------------------------------------------
+-- Este es el renglonado con el que se ofertó el proyecto al cliente. Su suma
+-- (subtotal) alimenta automáticamente `proyectos.valor_antes_impuestos`, y
+-- sus cantidades son las que se usan en el "Corte de Obra" para calcular lo
+-- ejecutado/pendiente y generar la factura al cliente.
+create table public.cotizacion_items (
+  id uuid primary key default gen_random_uuid(),
+  proyecto_id uuid not null references public.proyectos(id) on delete cascade,
+  numero int,
+  referencia text,
+  descripcion text not null,
+  cantidad numeric(14,2) not null default 1,
+  unidad text default 'un',
+  tiempo_entrega text,
+  marca text,
+  precio_unitario numeric(14,2) not null default 0,
+  subtotal numeric(14,2) generated always as (cantidad * precio_unitario) stored,
+  observaciones text,
+  created_at timestamptz not null default now()
+);
+
+-- ----------------------------------------------------------------------------
+-- 7. PRESUPUESTO DE COSTOS (Materiales/Equipos/Alquileres y Mano de Obra)
+-- ----------------------------------------------------------------------------
+-- Lado costo del proyecto (lo que cuesta ejecutarlo, no lo que se cobra).
+-- tipo MO = Presupuesto de Mano de Obra (alimenta el Corte de Contratista);
+-- tipo MP/EQUIPO/ALQUILER/OTRO = Presupuesto de Materiales, Equipos y
+-- Alquileres (referencia para comparar contra las Compras reales).
 create table public.presupuesto_items (
   id uuid primary key default gen_random_uuid(),
   proyecto_id uuid not null references public.proyectos(id) on delete cascade,
   tipo text not null default 'MP' check (tipo in ('MP','MO','EQUIPO','ALQUILER','OTRO')),
+  numero int,
+  referencia text,
   descripcion text not null,
   unidad text default 'un',
   cantidad numeric(14,2) not null default 1,
+  tiempo_entrega text,
+  marca text,
   valor_unitario numeric(14,2) not null default 0,
   valor_total numeric(14,2) generated always as (cantidad * valor_unitario) stored,
   -- Si este renglón lo ejecuta un contratista específico, sus cantidades
@@ -314,17 +349,36 @@ create table public.ejecucion_cortes (
   unique (proyecto_id, numero_corte)
 );
 
+-- Cada renglón de un corte apunta O BIEN a un renglón de la Cotización
+-- (item_tipo = 'cotizacion' → avance de Obra, alimenta la factura al
+-- cliente) O BIEN a un renglón de Mano de Obra del presupuesto
+-- (item_tipo = 'mano_obra' → avance del Contratista, alimenta su corte de
+-- pago). Nunca ambos ni ninguno.
 create table public.ejecucion_items (
   id uuid primary key default gen_random_uuid(),
   corte_id uuid not null references public.ejecucion_cortes(id) on delete cascade,
-  presupuesto_item_id uuid not null references public.presupuesto_items(id) on delete cascade,
+  item_tipo text not null default 'cotizacion' check (item_tipo in ('cotizacion','mano_obra')),
+  cotizacion_item_id uuid references public.cotizacion_items(id) on delete cascade,
+  presupuesto_item_id uuid references public.presupuesto_items(id) on delete cascade,
   cantidad_periodo numeric(14,2) not null default 0,
   valor_unitario_snapshot numeric(14,2) not null default 0,
   valor_periodo numeric(14,2) generated always as (cantidad_periodo * valor_unitario_snapshot) stored,
   notas text,
   created_at timestamptz not null default now(),
-  unique (corte_id, presupuesto_item_id)
+  constraint ejecucion_items_referencia_valida check (
+    (item_tipo = 'cotizacion' and cotizacion_item_id is not null and presupuesto_item_id is null)
+    or
+    (item_tipo = 'mano_obra' and presupuesto_item_id is not null and cotizacion_item_id is null)
+  )
 );
+
+create unique index ejecucion_items_uq_cotizacion
+  on public.ejecucion_items (corte_id, cotizacion_item_id)
+  where cotizacion_item_id is not null;
+
+create unique index ejecucion_items_uq_presupuesto
+  on public.ejecucion_items (corte_id, presupuesto_item_id)
+  where presupuesto_item_id is not null;
 
 -- Registro de qué se generó (factura / corte de contratista) a partir de cada
 -- corte de ejecución, para no duplicar y para poder mostrar "Ya generado".
@@ -345,7 +399,7 @@ create table public.documentos (
   id uuid primary key default gen_random_uuid(),
   proyecto_id uuid not null references public.proyectos(id) on delete cascade,
   categoria text not null default 'otro'
-    check (categoria in ('contrato','cotizacion','orden_compra','planos','acta_entrega','corte','otro')),
+    check (categoria in ('contrato','cotizacion','orden_compra','planos','polizas','acta_entrega','corte','otro')),
   nombre_archivo text not null,
   url text not null,
   subido_por uuid references public.profiles(id) on delete set null,
@@ -355,12 +409,15 @@ create table public.documentos (
 -- ----------------------------------------------------------------------------
 -- 11C. TAREAS / EJECUCIÓN ESTILO ASANA (Kanban + Gantt)
 -- ----------------------------------------------------------------------------
--- El avance del proyecto se calcula ponderando cada tarea por el costo de
--- venta del renglón de presupuesto que tenga vinculado (si no tiene, usa
--- peso_manual). Una tarea "hecha" aporta el 100% de su peso; el resto 0%.
+-- El avance del proyecto se calcula ponderando cada tarea por el valor de
+-- venta del renglón de COTIZACIÓN que tenga vinculado (así el % de avance
+-- refleja peso económico real frente al cliente); si no tiene cotización
+-- vinculada, usa el renglón de presupuesto (costo) y si tampoco, el
+-- peso_manual. Una tarea "hecha" aporta el 100% de su peso; el resto 0%.
 create table public.tareas (
   id uuid primary key default gen_random_uuid(),
   proyecto_id uuid not null references public.proyectos(id) on delete cascade,
+  cotizacion_item_id uuid references public.cotizacion_items(id) on delete set null,
   presupuesto_item_id uuid references public.presupuesto_items(id) on delete set null,
   titulo text not null,
   descripcion text,
@@ -390,10 +447,11 @@ begin
   v_proyecto_id := coalesce(new.proyecto_id, old.proyecto_id);
 
   select
-    coalesce(sum(coalesce(pi.valor_total, t.peso_manual, 1)), 0),
-    coalesce(sum(case when t.estado = 'hecho' then coalesce(pi.valor_total, t.peso_manual, 1) else 0 end), 0)
+    coalesce(sum(coalesce(ci.subtotal, pi.valor_total, t.peso_manual, 1)), 0),
+    coalesce(sum(case when t.estado = 'hecho' then coalesce(ci.subtotal, pi.valor_total, t.peso_manual, 1) else 0 end), 0)
   into v_total_peso, v_peso_hecho
   from public.tareas t
+  left join public.cotizacion_items ci on ci.id = t.cotizacion_item_id
   left join public.presupuesto_items pi on pi.id = t.presupuesto_item_id
   where t.proyecto_id = v_proyecto_id;
 
@@ -442,8 +500,8 @@ begin
   for t in
     select unnest(array[
       'profiles','empresas','clientes','clientes_contactos','proveedores',
-      'proveedores_contactos','contratistas','proyectos','presupuesto_items',
-      'facturas','compras','proyecto_contratistas','cortes_pago',
+      'proveedores_contactos','contratistas','proyectos','cotizacion_items',
+      'presupuesto_items','facturas','compras','proyecto_contratistas','cortes_pago',
       'ejecucion_cortes','ejecucion_items','ejecucion_generaciones',
       'documentos','tareas','suministros'
     ])

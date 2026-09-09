@@ -22,18 +22,23 @@ async function imagenABase64(url) {
 
 // Cantidad acumulada ejecutada de un renglón hasta (e incluyendo) el corte
 // dado, sumando todos los cortes con numero_corte <= corte.numero_corte.
-function _acumuladoHastaPdf(presupuestoItemId, corte, todosLosCortes) {
+// itemTipo: 'cotizacion' (Corte de Obra, campo cotizacion_item_id) |
+// 'mano_obra' (Corte de Contratista, campo presupuesto_item_id).
+function _acumuladoHastaPdf(itemId, itemTipo, corte, todosLosCortes) {
+  const campo = itemTipo === "cotizacion" ? "cotizacion_item_id" : "presupuesto_item_id";
   return (todosLosCortes || [])
     .filter((c) => c.numero_corte <= corte.numero_corte)
     .reduce((acc, c) => {
-      const item = (c.ejecucion_items || []).find((i) => i.presupuesto_item_id === presupuestoItemId);
+      const item = (c.ejecucion_items || []).find((i) => i.item_tipo === itemTipo && i[campo] === itemId);
       return acc + Number(item?.cantidad_periodo || 0);
     }, 0);
 }
 
-// options: { proyecto, corte, todosLosCortes, presupuestoCache, variante: 'cliente'|'contratista', contratistaId, contratistasCache }
+// options: { proyecto, corte, todosLosCortes, items (normalizados: id, descripcion,
+// unidad, cantidad, valor_unitario, valor_total), itemTipo: 'cotizacion'|'mano_obra',
+// valorContratoTotal, variante: 'cliente'|'contratista', contratistaId, contratistasCache }
 async function generarActaCortePDF(options) {
-  const { proyecto, corte, todosLosCortes, presupuestoCache, variante, contratistaId, contratistasCache } = options;
+  const { proyecto, corte, todosLosCortes, items, itemTipo, valorContratoTotal, variante, contratistaId, contratistasCache } = options;
 
   if (!window.jspdf || !window.jspdf.jsPDF) {
     return mostrarAviso("No se pudo cargar el generador de PDF (revisa tu conexión)", "error");
@@ -80,35 +85,30 @@ async function generarActaCortePDF(options) {
 
   y += 32;
 
-  const items =
-    variante === "contratista"
-      ? (presupuestoCache || []).filter((pi) => pi.contratista_id === contratistaId)
-      : presupuestoCache || [];
-  const itemsCorte = corte.ejecucion_items || [];
+  const itemsCorte = (corte.ejecucion_items || []).filter((i) => i.item_tipo === itemTipo);
 
-  const filasDatos = items.map((pi) => {
-    const existente = itemsCorte.find((i) => i.presupuesto_item_id === pi.id);
+  const filasDatos = (items || []).map((it) => {
+    const campo = itemTipo === "cotizacion" ? "cotizacion_item_id" : "presupuesto_item_id";
+    const existente = itemsCorte.find((i) => i[campo] === it.id);
     const cantidadEsteCorte = Number(existente?.cantidad_periodo || 0);
-    const acumulado = _acumuladoHastaPdf(pi.id, corte, todosLosCortes);
-    const pendiente = Number(pi.cantidad) - acumulado;
+    const acumulado = _acumuladoHastaPdf(it.id, itemTipo, corte, todosLosCortes);
+    const pendiente = Number(it.cantidad) - acumulado;
     return {
-      descripcion: pi.descripcion,
-      unidad: pi.unidad || "un",
-      cantidadInicial: Number(pi.cantidad),
+      descripcion: it.descripcion,
+      unidad: it.unidad || "un",
+      cantidadInicial: Number(it.cantidad),
       acumulado,
       pendiente,
       cantidadEsteCorte,
-      valorUnitario: Number(pi.valor_unitario),
-      valorEsteCorte: cantidadEsteCorte * Number(pi.valor_unitario),
-      valorAcumulado: acumulado * Number(pi.valor_unitario),
+      valorUnitario: Number(it.valor_unitario),
+      valorEsteCorte: cantidadEsteCorte * Number(it.valor_unitario),
+      valorAcumulado: acumulado * Number(it.valor_unitario),
     };
   });
 
   const valorActaActual = filasDatos.reduce((a, f) => a + f.valorEsteCorte, 0);
   const valorEjecutadoAcumulado = filasDatos.reduce((a, f) => a + f.valorAcumulado, 0);
-  const valorContratoTotal =
-    variante === "contratista" ? items.reduce((a, pi) => a + Number(pi.valor_total || 0), 0) : Number(proyecto.valor_total || 0);
-  const saldoPendiente = valorContratoTotal - valorEjecutadoAcumulado;
+  const saldoPendiente = Number(valorContratoTotal || 0) - valorEjecutadoAcumulado;
   const contratista = variante === "contratista" ? (contratistasCache || []).find((c) => c.id === contratistaId) : null;
 
   const datosResumen = [

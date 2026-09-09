@@ -147,9 +147,10 @@
                 <label class="flex items-center gap-1"><input type="radio" name="c-tipo-contrato" value="aiu" class="text-primary" /> AIU</label>
               </div>
             </div>
-            <div>
-              <label class="mb-1 block text-xs font-medium text-gray-700">Valor antes de impuestos (COP)</label>
-              <input id="c-valor-antes" class="input-moneda w-full rounded-lg border-gray-300 text-sm" inputmode="decimal" />
+            <div class="rounded-lg bg-gray-50 p-3 text-sm">
+              <span class="text-gray-600">Valor antes de impuestos (Subtotal de la Cotización): </span>
+              <span class="font-semibold text-gray-900">${formatoMoneda(proyecto.valor_antes_impuestos || 0)}</span>
+              <p class="mt-1 text-xs text-gray-400">Se calcula solo desde la pestaña Cotización. Aquí solo defines el tipo de contrato y los porcentajes.</p>
             </div>
             <div id="c-bloque-iva">
               <label class="mb-1 block text-xs font-medium text-gray-700">IVA (%)</label>
@@ -185,7 +186,7 @@
     const radios = document.querySelectorAll('input[name="c-tipo-contrato"]');
     const bloqueIva = document.getElementById("c-bloque-iva");
     const bloqueAiu = document.getElementById("c-bloque-aiu");
-    const campos = ["c-valor-antes", "c-iva", "c-admin", "c-imprev", "c-util"].map((id) => document.getElementById(id));
+    const campos = ["c-iva", "c-admin", "c-imprev", "c-util"].map((id) => document.getElementById(id));
 
     function actualizarBloques() {
       const tipo = document.querySelector('input[name="c-tipo-contrato"]:checked')?.value || "iva";
@@ -195,26 +196,24 @@
     }
     function actualizarPreview() {
       const tipo = document.querySelector('input[name="c-tipo-contrato"]:checked')?.value || "iva";
-      const base = valorMoneda(document.getElementById("c-valor-antes"));
+      const base = Number(proyecto.valor_antes_impuestos || 0);
+      const iva = Number(document.getElementById("c-iva").value || 0);
       let total;
       if (tipo === "aiu") {
         const admin = Number(document.getElementById("c-admin").value || 0);
         const imprev = Number(document.getElementById("c-imprev").value || 0);
         const util = Number(document.getElementById("c-util").value || 0);
-        total = base * (1 + (admin + imprev + util) / 100);
+        total = base * (1 + (admin + imprev + util) / 100) + base * (util / 100) * (iva / 100);
       } else {
-        const iva = Number(document.getElementById("c-iva").value || 0);
         total = base * (1 + iva / 100);
       }
       document.getElementById("c-preview-total").textContent = formatoMoneda(total);
     }
 
-    activarCamposMoneda(".input-moneda", document.getElementById("modal-contrato"));
     radios.forEach((r) => r.addEventListener("change", actualizarBloques));
     campos.forEach((el) => el.addEventListener("input", actualizarPreview));
 
     document.querySelector(`input[name="c-tipo-contrato"][value="${proyecto.tipo_contrato}"]`).checked = true;
-    establecerValorMoneda(document.getElementById("c-valor-antes"), proyecto.valor_antes_impuestos || 0);
     document.getElementById("c-iva").value = proyecto.iva_porcentaje ?? 19;
     document.getElementById("c-admin").value = proyecto.administracion_porcentaje ?? 0;
     document.getElementById("c-imprev").value = proyecto.imprevistos_porcentaje ?? 0;
@@ -227,7 +226,6 @@
       const tipo = document.querySelector('input[name="c-tipo-contrato"]:checked')?.value || "iva";
       const payload = {
         tipo_contrato: tipo,
-        valor_antes_impuestos: valorMoneda(document.getElementById("c-valor-antes")),
         iva_porcentaje: Number(document.getElementById("c-iva").value || 0),
         administracion_porcentaje: Number(document.getElementById("c-admin").value || 0),
         imprevistos_porcentaje: Number(document.getElementById("c-imprev").value || 0),
@@ -296,6 +294,170 @@
   }
 
   // --------------------------------------------------------------------
+  // COTIZACIÓN (lado venta — alimenta el valor del contrato y el Corte de Obra)
+  // --------------------------------------------------------------------
+  let cotizacionCache = [];
+
+  function actualizarTotalesCotizacion() {
+    const subtotal = cotizacionCache.reduce((a, r) => a + Number(r.cantidad || 0) * Number(r.precio_unitario || 0), 0);
+    const tipo = proyecto?.tipo_contrato || "iva";
+    const iva = Number(proyecto?.iva_porcentaje || 0);
+    document.getElementById("cot-subtotal").textContent = formatoMoneda(subtotal);
+
+    if (tipo === "aiu") {
+      const admin = Number(proyecto?.administracion_porcentaje || 0);
+      const imprev = Number(proyecto?.imprevistos_porcentaje || 0);
+      const util = Number(proyecto?.utilidad_porcentaje || 0);
+      const valorAdmin = subtotal * (admin / 100);
+      const valorImprev = subtotal * (imprev / 100);
+      const valorUtil = subtotal * (util / 100);
+      const valorIvaUtil = valorUtil * (iva / 100);
+      document.getElementById("cot-bloque-iva").classList.add("hidden");
+      document.getElementById("cot-bloque-aiu").classList.remove("hidden");
+      document.getElementById("cot-valor-admin").textContent = formatoMoneda(valorAdmin);
+      document.getElementById("cot-valor-imprev").textContent = formatoMoneda(valorImprev);
+      document.getElementById("cot-valor-util").textContent = formatoMoneda(valorUtil);
+      document.getElementById("cot-label-iva-util").textContent = `IVA sobre la Utilidad (${iva}%)`;
+      document.getElementById("cot-valor-iva-util").textContent = formatoMoneda(valorIvaUtil);
+      document.getElementById("cot-total").textContent = formatoMoneda(subtotal + valorAdmin + valorImprev + valorUtil + valorIvaUtil);
+    } else {
+      const valorIva = subtotal * (iva / 100);
+      document.getElementById("cot-bloque-iva").classList.remove("hidden");
+      document.getElementById("cot-bloque-aiu").classList.add("hidden");
+      document.getElementById("cot-label-iva").textContent = `IVA (${iva}%)`;
+      document.getElementById("cot-valor-iva").textContent = formatoMoneda(valorIva);
+      document.getElementById("cot-label-iva-util").textContent = "IVA sobre la Utilidad";
+      document.getElementById("cot-valor-iva-util").textContent = formatoMoneda(0);
+      document.getElementById("cot-total").textContent = formatoMoneda(subtotal + valorIva);
+    }
+  }
+
+  async function sincronizarValorContrato() {
+    const subtotal = cotizacionCache.reduce((a, r) => a + Number(r.cantidad || 0) * Number(r.precio_unitario || 0), 0);
+    const { error } = await window.sb.from("proyectos").update({ valor_antes_impuestos: subtotal }).eq("id", proyectoId);
+    if (!error && proyecto) proyecto.valor_antes_impuestos = subtotal;
+  }
+
+  function renderCotizacion() {
+    document.getElementById("tabla-cotizacion").innerHTML = cotizacionCache.length
+      ? cotizacionCache
+          .map(
+            (item) => `
+        <tr class="border-b border-gray-50 last:border-0">
+          <td class="px-3 py-2.5">${item.numero ?? "—"}</td>
+          <td class="px-3 py-2.5">${escapeHtml(item.referencia || "—")}</td>
+          <td class="px-3 py-2.5">${escapeHtml(item.descripcion)}</td>
+          <td class="px-3 py-2.5">${item.cantidad}</td>
+          <td class="px-3 py-2.5">${escapeHtml(item.unidad || "un")}</td>
+          <td class="px-3 py-2.5">${escapeHtml(item.tiempo_entrega || "—")}</td>
+          <td class="px-3 py-2.5">${escapeHtml(item.marca || "—")}</td>
+          <td class="px-3 py-2.5">${formatoMoneda(item.precio_unitario)}</td>
+          <td class="px-3 py-2.5 font-medium">${formatoMoneda(item.subtotal)}</td>
+          <td class="px-3 py-2.5 text-xs text-gray-500">${escapeHtml(item.observaciones || "—")}</td>
+          <td class="px-3 py-2.5 text-right">
+            <button class="btn-borrar-cotizacion text-gray-400 hover:text-red-600" data-id="${item.id}">
+              <span class="material-symbols-outlined text-[18px]">delete</span>
+            </button>
+          </td>
+        </tr>`
+          )
+          .join("")
+      : `<tr><td class="px-3 py-6 text-center text-gray-400" colspan="11">Aún no has agregado renglones a la cotización.</td></tr>`;
+
+    document.querySelectorAll(".btn-borrar-cotizacion").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        if (!confirm("¿Borrar este renglón de la cotización?")) return;
+        const { error } = await window.sb.from("cotizacion_items").delete().eq("id", btn.dataset.id);
+        if (error) return manejarError(error, "No se pudo borrar");
+        await cargarCotizacion();
+        sincronizarValorContrato();
+      })
+    );
+    actualizarTotalesCotizacion();
+  }
+
+  async function cargarCotizacion() {
+    const { data, error } = await window.sb.from("cotizacion_items").select("*").eq("proyecto_id", proyectoId).order("numero").order("created_at");
+    if (error) return manejarError(error, "No se pudo cargar la cotización");
+    cotizacionCache = data || [];
+    renderCotizacion();
+  }
+
+  document.getElementById("form-cotizacion-item").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const numeroTxt = document.getElementById("cot-item-numero").value;
+    const payload = {
+      proyecto_id: proyectoId,
+      numero: numeroTxt === "" ? null : Number(numeroTxt),
+      referencia: document.getElementById("cot-item-referencia").value.trim() || null,
+      descripcion: document.getElementById("cot-item-descripcion").value.trim(),
+      cantidad: Number(document.getElementById("cot-item-cantidad").value || 1),
+      unidad: document.getElementById("cot-item-unidad").value.trim() || "un",
+      tiempo_entrega: document.getElementById("cot-item-tiempo").value.trim() || null,
+      marca: document.getElementById("cot-item-marca").value.trim() || null,
+      precio_unitario: valorMoneda(document.getElementById("cot-item-precio")),
+      observaciones: document.getElementById("cot-item-observaciones").value.trim() || null,
+    };
+    const { error } = await window.sb.from("cotizacion_items").insert(payload);
+    if (error) return manejarError(error, "No se pudo agregar el renglón");
+    e.target.reset();
+    document.getElementById("cot-item-cantidad").value = 1;
+    await cargarCotizacion();
+    sincronizarValorContrato();
+  });
+
+  const COLUMNAS_PLANTILLA_COTIZACION = [
+    "numero",
+    "referencia",
+    "descripcion",
+    "cantidad",
+    "unidad",
+    "tiempo_entrega",
+    "marca",
+    "precio_unitario",
+    "observaciones",
+  ];
+
+  document.getElementById("btn-plantilla-cotizacion").addEventListener("click", () => {
+    descargarPlantillaExcel("plantilla_cotizacion.xlsx", COLUMNAS_PLANTILLA_COTIZACION, [
+      [1, "REF-001", "Cámara domo 4MP", 10, "un", "8 días", "Dahua", 350000, ""],
+    ]);
+  });
+
+  document.getElementById("input-importar-cotizacion").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const filas = await leerArchivoExcel(file);
+      if (!filas.length) return mostrarAviso("El archivo no tiene filas para importar", "error");
+      const payloads = filas
+        .filter((f) => String(f.descripcion || "").trim())
+        .map((f) => ({
+          proyecto_id: proyectoId,
+          numero: f.numero !== "" && f.numero != null ? Number(f.numero) : null,
+          referencia: String(f.referencia || "").trim() || null,
+          descripcion: String(f.descripcion).trim(),
+          cantidad: Number(f.cantidad || 1),
+          unidad: String(f.unidad || "un").trim() || "un",
+          tiempo_entrega: String(f.tiempo_entrega || "").trim() || null,
+          marca: String(f.marca || "").trim() || null,
+          precio_unitario: Number(f.precio_unitario || 0),
+          observaciones: String(f.observaciones || "").trim() || null,
+        }));
+      if (!payloads.length) return mostrarAviso("No se encontraron filas válidas (falta la descripción)", "error");
+      const { error } = await window.sb.from("cotizacion_items").insert(payloads);
+      if (error) return manejarError(error, "No se pudo importar la cotización");
+      mostrarAviso(`${payloads.length} renglones importados`, "exito");
+      await cargarCotizacion();
+      sincronizarValorContrato();
+    } catch (err) {
+      manejarError(err, "No se pudo leer el archivo Excel");
+    } finally {
+      e.target.value = "";
+    }
+  });
+
+  // --------------------------------------------------------------------
   // PRESUPUESTO
   // --------------------------------------------------------------------
   let presupuestoCache = [];
@@ -309,21 +471,32 @@
       contratistasCache.map((c) => `<option value="${c.id}">${escapeHtml(c.nombre)}</option>`).join("");
   }
 
-  // Suma, por categoría (tipo de renglón), lo realmente ejecutado hasta la fecha
-  // (todos los cortes de ejecución del proyecto), para calcular % de presupuesto gastado.
+  // Suma, por categoría, lo realmente ejecutado hasta la fecha para calcular
+  // el % de presupuesto gastado. Mano de Obra (MO) se mide con lo avanzado en
+  // los Cortes de Contratista (ejecucion_items); Materiales/Equipos/Alquiler/
+  // Otro se miden con las Compras reales registradas para el proyecto.
   async function calcularEjecutadoPorTipo() {
+    const acumulado = {};
+
     const { data: cortes } = await window.sb.from("ejecucion_cortes").select("id").eq("proyecto_id", proyectoId);
     const corteIds = (cortes || []).map((c) => c.id);
-    if (!corteIds.length) return {};
-    const { data: items } = await window.sb
-      .from("ejecucion_items")
-      .select("valor_periodo, presupuesto_items(tipo)")
-      .in("corte_id", corteIds);
-    const acumulado = {};
-    (items || []).forEach((i) => {
-      const tipo = i.presupuesto_items?.tipo || "OTRO";
-      acumulado[tipo] = (acumulado[tipo] || 0) + Number(i.valor_periodo || 0);
+    if (corteIds.length) {
+      const { data: items } = await window.sb
+        .from("ejecucion_items")
+        .select("valor_periodo, item_tipo")
+        .in("corte_id", corteIds)
+        .eq("item_tipo", "mano_obra");
+      acumulado.MO = (items || []).reduce((a, i) => a + Number(i.valor_periodo || 0), 0);
+    }
+
+    const { data: compras } = await window.sb.from("compras").select("valor, categoria").eq("proyecto_id", proyectoId);
+    const CATEGORIA_COMPRA_A_TIPO = { materiales: "MP", equipos: "EQUIPO", alquiler: "ALQUILER", otros: "OTRO" };
+    (compras || []).forEach((c) => {
+      const tipo = CATEGORIA_COMPRA_A_TIPO[c.categoria];
+      if (!tipo) return; // compras categoría 'mano_obra' no aplica aquí (la MO se mide por Cortes)
+      acumulado[tipo] = (acumulado[tipo] || 0) + Number(c.valor || 0);
     });
+
     return acumulado;
   }
 
@@ -826,7 +999,7 @@
   async function cargarCortesEjecucion() {
     const { data: cortes, error } = await window.sb
       .from("ejecucion_cortes")
-      .select("*, ejecucion_items(*, presupuesto_items(*, contratistas(nombre))), ejecucion_generaciones(*)")
+      .select("*, ejecucion_items(*, cotizacion_items(*), presupuesto_items(*, contratistas(nombre))), ejecucion_generaciones(*)")
       .eq("proyecto_id", proyectoId)
       .order("numero_corte", { ascending: false });
     if (error) return manejarError(error, "No se pudo cargar la ejecución");
@@ -845,20 +1018,64 @@
 
   // Cantidad acumulada ejecutada de un renglón hasta (e incluyendo) el corte dado,
   // sumando todos los cortes con numero_corte <= corte.numero_corte.
-  function acumuladoHasta(presupuestoItemId, corte, todosLosCortes) {
+  // itemTipo: 'cotizacion' (Corte de Obra) | 'mano_obra' (Corte de Contratista)
+  function acumuladoHasta(itemId, itemTipo, corte, todosLosCortes) {
+    const campo = itemTipo === "cotizacion" ? "cotizacion_item_id" : "presupuesto_item_id";
     return todosLosCortes
       .filter((c) => c.numero_corte <= corte.numero_corte)
       .reduce((acc, c) => {
-        const item = (c.ejecucion_items || []).find((i) => i.presupuesto_item_id === presupuestoItemId);
+        const item = (c.ejecucion_items || []).find((i) => i.item_tipo === itemTipo && i[campo] === itemId);
         return acc + Number(item?.cantidad_periodo || 0);
       }, 0);
   }
 
   function renderCorteCard(corte, todosLosCortes) {
     const items = corte.ejecucion_items || [];
-    const totalCorte = items.reduce((a, i) => a + Number(i.valor_periodo || 0), 0);
+    const itemsObra = items.filter((i) => i.item_tipo === "cotizacion");
+    const itemsMO = items.filter((i) => i.item_tipo === "mano_obra");
+    const totalObra = itemsObra.reduce((a, i) => a + Number(i.valor_periodo || 0), 0);
     const yaFacturado = (corte.ejecucion_generaciones || []).some((g) => g.tipo === "factura");
-    const contratistasEnCorte = [...new Set(items.map((i) => i.presupuesto_items?.contratista_id).filter(Boolean))];
+    const moDelPresupuesto = presupuestoCache.filter((pi) => pi.tipo === "MO");
+    const contratistasEnCorte = [...new Set(itemsMO.map((i) => i.presupuesto_items?.contratista_id).filter(Boolean))];
+
+    const filaObra = (ci) => {
+      const existente = itemsObra.find((i) => i.cotizacion_item_id === ci.id);
+      const acumulado = acumuladoHasta(ci.id, "cotizacion", corte, todosLosCortes);
+      const pendiente = Number(ci.cantidad) - acumulado;
+      return `
+      <tr data-cotizacion-item-id="${ci.id}" data-item-tipo="cotizacion" data-ejecucion-item-id="${existente ? existente.id : ""}">
+        <td class="py-1.5 pr-3">${escapeHtml(ci.descripcion)}</td>
+        <td class="py-1.5 pr-3">${ci.cantidad} ${escapeHtml(ci.unidad || "")}</td>
+        <td class="py-1.5 pr-3">${acumulado} ${escapeHtml(ci.unidad || "")}</td>
+        <td class="py-1.5 pr-3 ${pendiente < 0 ? "text-red-600 font-semibold" : ""}">${pendiente} ${escapeHtml(ci.unidad || "")}</td>
+        <td class="py-1.5 pr-3">${formatoMoneda(ci.precio_unitario)}</td>
+        <td class="py-1.5 pr-3">
+          <input type="number" min="0" step="0.01" class="input-cantidad-corte w-24 rounded-lg border-gray-300 text-xs"
+            value="${existente ? existente.cantidad_periodo : ""}" placeholder="0" data-valor-unitario="${ci.precio_unitario}" />
+        </td>
+        <td class="py-1.5 pr-3 valor-linea-corte">${formatoMoneda(existente ? existente.valor_periodo : 0)}</td>
+      </tr>`;
+    };
+
+    const filaMO = (pi) => {
+      const existente = itemsMO.find((i) => i.presupuesto_item_id === pi.id);
+      const acumulado = acumuladoHasta(pi.id, "mano_obra", corte, todosLosCortes);
+      const pendiente = Number(pi.cantidad) - acumulado;
+      return `
+      <tr data-presupuesto-item-id="${pi.id}" data-item-tipo="mano_obra" data-ejecucion-item-id="${existente ? existente.id : ""}">
+        <td class="py-1.5 pr-3">${escapeHtml(pi.descripcion)}</td>
+        <td class="py-1.5 pr-3">${escapeHtml(pi.contratistas?.nombre || "—")}</td>
+        <td class="py-1.5 pr-3">${pi.cantidad} ${escapeHtml(pi.unidad || "")}</td>
+        <td class="py-1.5 pr-3">${acumulado} ${escapeHtml(pi.unidad || "")}</td>
+        <td class="py-1.5 pr-3 ${pendiente < 0 ? "text-red-600 font-semibold" : ""}">${pendiente} ${escapeHtml(pi.unidad || "")}</td>
+        <td class="py-1.5 pr-3">${formatoMoneda(pi.valor_unitario)}</td>
+        <td class="py-1.5 pr-3">
+          <input type="number" min="0" step="0.01" class="input-cantidad-corte w-24 rounded-lg border-gray-300 text-xs"
+            value="${existente ? existente.cantidad_periodo : ""}" placeholder="0" data-valor-unitario="${pi.valor_unitario}" />
+        </td>
+        <td class="py-1.5 pr-3 valor-linea-corte">${formatoMoneda(existente ? existente.valor_periodo : 0)}</td>
+      </tr>`;
+    };
 
     return `
     <div class="rounded-xl border border-gray-200 bg-white p-4" data-corte-card="${corte.id}">
@@ -869,8 +1086,8 @@
         </div>
         <div class="flex items-center gap-4">
           <div class="text-right">
-            <p class="text-xs text-gray-500">Valor de este corte</p>
-            <p class="font-semibold text-primary">${formatoMoneda(totalCorte)}</p>
+            <p class="text-xs text-gray-500">Valor de este corte (Obra)</p>
+            <p class="font-semibold text-primary">${formatoMoneda(totalObra)}</p>
           </div>
           <button class="btn-toggle-corte rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">
             Ver / editar avances
@@ -879,7 +1096,33 @@
       </div>
 
       <div class="hidden mt-4 border-t border-gray-100 pt-4 panel-corte">
-        <p class="mb-2 text-xs text-gray-500">Cantidades iniciales (presupuesto), acumulado ejecutado a la fecha, pendiente y lo ejecutado en este corte.</p>
+        <p class="mb-1 text-xs font-bold uppercase text-gray-500">Avance de Obra (Cotización → Factura Cliente)</p>
+        <p class="mb-2 text-xs text-gray-500">Cantidades iniciales (de la cotización), acumulado ejecutado, pendiente y lo ejecutado en este corte.</p>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="text-gray-500">
+              <tr>
+                <th class="py-1.5 pr-3">Renglón</th>
+                <th class="py-1.5 pr-3">Cant. Inicial</th>
+                <th class="py-1.5 pr-3">Ejecutado Acum.</th>
+                <th class="py-1.5 pr-3">Pendiente</th>
+                <th class="py-1.5 pr-3">Vlr. Unitario</th>
+                <th class="py-1.5 pr-3">Cant. este corte</th>
+                <th class="py-1.5 pr-3">Valor del corte</th>
+              </tr>
+            </thead>
+            <tbody class="tabla-items-corte-obra">
+              ${
+                cotizacionCache.length
+                  ? cotizacionCache.map(filaObra).join("")
+                  : `<tr><td class="py-3 text-gray-400" colspan="7">Este proyecto no tiene renglones de cotización.</td></tr>`
+              }
+            </tbody>
+          </table>
+        </div>
+
+        <p class="mb-1 mt-5 text-xs font-bold uppercase text-gray-500">Avance de Mano de Obra (Contratistas)</p>
+        <p class="mb-2 text-xs text-gray-500">Cantidades iniciales (presupuesto de mano de obra), acumulado, pendiente y lo ejecutado en este corte.</p>
         <div class="overflow-x-auto">
           <table class="w-full text-left text-xs">
             <thead class="text-gray-500">
@@ -894,31 +1137,16 @@
                 <th class="py-1.5 pr-3">Valor del corte</th>
               </tr>
             </thead>
-            <tbody class="tabla-items-corte">
-              ${presupuestoCache
-                .map((pi) => {
-                  const existente = items.find((i) => i.presupuesto_item_id === pi.id);
-                  const acumulado = acumuladoHasta(pi.id, corte, todosLosCortes);
-                  const pendiente = Number(pi.cantidad) - acumulado;
-                  return `
-                <tr data-presupuesto-item-id="${pi.id}">
-                  <td class="py-1.5 pr-3">${escapeHtml(pi.descripcion)} <span class="text-gray-400">(${ETIQUETA_TIPO_ITEM[pi.tipo] || pi.tipo})</span></td>
-                  <td class="py-1.5 pr-3">${escapeHtml(pi.contratistas?.nombre || "—")}</td>
-                  <td class="py-1.5 pr-3">${pi.cantidad} ${escapeHtml(pi.unidad || "")}</td>
-                  <td class="py-1.5 pr-3">${acumulado} ${escapeHtml(pi.unidad || "")}</td>
-                  <td class="py-1.5 pr-3 ${pendiente < 0 ? "text-red-600 font-semibold" : ""}">${pendiente} ${escapeHtml(pi.unidad || "")}</td>
-                  <td class="py-1.5 pr-3">${formatoMoneda(pi.valor_unitario)}</td>
-                  <td class="py-1.5 pr-3">
-                    <input type="number" min="0" step="0.01" class="input-cantidad-corte w-24 rounded-lg border-gray-300 text-xs"
-                      value="${existente ? existente.cantidad_periodo : ""}" placeholder="0" />
-                  </td>
-                  <td class="py-1.5 pr-3 valor-linea-corte">${formatoMoneda(existente ? existente.valor_periodo : 0)}</td>
-                </tr>`;
-                })
-                .join("")}
+            <tbody class="tabla-items-corte-mo">
+              ${
+                moDelPresupuesto.length
+                  ? moDelPresupuesto.map(filaMO).join("")
+                  : `<tr><td class="py-3 text-gray-400" colspan="8">Este proyecto no tiene renglones de mano de obra.</td></tr>`
+              }
             </tbody>
           </table>
         </div>
+
         <div class="mt-3 flex flex-wrap items-center justify-end gap-2">
           <button class="btn-guardar-avances rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-gray-700">
             Guardar avances
@@ -958,31 +1186,56 @@
     card.querySelectorAll(".input-cantidad-corte").forEach((input) => {
       input.addEventListener("input", () => {
         const fila = input.closest("tr");
-        const piId = fila.dataset.presupuestoItemId;
-        const pi = presupuestoCache.find((p) => p.id === piId);
         const cantidad = Number(input.value || 0);
-        fila.querySelector(".valor-linea-corte").textContent = formatoMoneda(cantidad * Number(pi?.valor_unitario || 0));
+        const valorUnitario = Number(input.dataset.valorUnitario || 0);
+        fila.querySelector(".valor-linea-corte").textContent = formatoMoneda(cantidad * valorUnitario);
       });
     });
 
     card.querySelector(".btn-guardar-avances").addEventListener("click", async () => {
-      const filas = card.querySelectorAll(".tabla-items-corte tr");
-      const payloads = [];
+      // No usamos upsert(onConflict:...) porque el índice único de esta tabla
+      // es parcial (solo aplica a cotizacion_item_id o a presupuesto_item_id
+      // según el renglón) y Postgres no permite usarlo como objetivo de
+      // ON CONFLICT sin repetir su condición — así que actualizamos por id si
+      // el renglón ya existía, o insertamos uno nuevo si no.
+      const filas = [
+        ...card.querySelectorAll(".tabla-items-corte-obra tr[data-cotizacion-item-id]"),
+        ...card.querySelectorAll(".tabla-items-corte-mo tr[data-presupuesto-item-id]"),
+      ];
+      const actualizaciones = [];
+      const inserciones = [];
       filas.forEach((fila) => {
-        const piId = fila.dataset.presupuestoItemId;
-        const cantidad = Number(fila.querySelector(".input-cantidad-corte").value || 0);
+        const inputCantidad = fila.querySelector(".input-cantidad-corte");
+        const cantidad = Number(inputCantidad?.value || 0);
         if (cantidad <= 0) return;
-        const pi = presupuestoCache.find((p) => p.id === piId);
-        payloads.push({
-          corte_id: corte.id,
-          presupuesto_item_id: piId,
-          cantidad_periodo: cantidad,
-          valor_unitario_snapshot: Number(pi?.valor_unitario || 0),
-        });
+        const valorUnitarioSnapshot = Number(inputCantidad.dataset.valorUnitario || 0);
+        const ejecucionItemId = fila.dataset.ejecucionItemId;
+        if (ejecucionItemId) {
+          actualizaciones.push(
+            window.sb
+              .from("ejecucion_items")
+              .update({ cantidad_periodo: cantidad, valor_unitario_snapshot: valorUnitarioSnapshot })
+              .eq("id", ejecucionItemId)
+          );
+        } else {
+          const itemTipo = fila.dataset.itemTipo;
+          inserciones.push({
+            corte_id: corte.id,
+            item_tipo: itemTipo,
+            cotizacion_item_id: itemTipo === "cotizacion" ? fila.dataset.cotizacionItemId : null,
+            presupuesto_item_id: itemTipo === "mano_obra" ? fila.dataset.presupuestoItemId : null,
+            cantidad_periodo: cantidad,
+            valor_unitario_snapshot: valorUnitarioSnapshot,
+          });
+        }
       });
-      if (!payloads.length) return mostrarAviso("No ingresaste ninguna cantidad para guardar", "error");
+      if (!actualizaciones.length && !inserciones.length) return mostrarAviso("No ingresaste ninguna cantidad para guardar", "error");
 
-      const { error } = await window.sb.from("ejecucion_items").upsert(payloads, { onConflict: "corte_id,presupuesto_item_id" });
+      const resultados = await Promise.all([
+        ...actualizaciones,
+        inserciones.length ? window.sb.from("ejecucion_items").insert(inserciones) : Promise.resolve({ error: null }),
+      ]);
+      const error = resultados.find((r) => r.error)?.error;
       if (error) return manejarError(error, "No se pudo guardar los avances");
       mostrarAviso("Avances guardados", "exito");
       cargarCortesEjecucion();
@@ -990,9 +1243,9 @@
 
     card.querySelector(".btn-generar-factura").addEventListener("click", async () => {
       if (card.querySelector(".btn-generar-factura").disabled) return;
-      const items = corte.ejecucion_items || [];
+      const items = (corte.ejecucion_items || []).filter((i) => i.item_tipo === "cotizacion");
       const total = items.reduce((a, i) => a + Number(i.valor_periodo || 0), 0);
-      if (total <= 0) return mostrarAviso("Este corte no tiene valor para facturar. Guarda avances primero.", "error");
+      if (total <= 0) return mostrarAviso("Este corte no tiene valor de Obra para facturar. Guarda avances primero.", "error");
       if (!confirm(`¿Generar una factura al cliente por ${formatoMoneda(total)} para el Corte N° ${corte.numero_corte}?`)) return;
 
       const { data: factura, error: errorFactura } = await window.sb
@@ -1023,7 +1276,7 @@
 
     card.querySelector(".btn-generar-cortes-contratista").addEventListener("click", async () => {
       if (card.querySelector(".btn-generar-cortes-contratista").disabled) return;
-      const items = corte.ejecucion_items || [];
+      const items = (corte.ejecucion_items || []).filter((i) => i.item_tipo === "mano_obra");
       const generadosPrevios = new Set(
         (corte.ejecucion_generaciones || [])
           .filter((g) => g.tipo === "corte_contratista")
@@ -1118,7 +1371,16 @@
           proyecto,
           corte,
           todosLosCortes: todosLosCortesCache,
-          presupuestoCache,
+          items: cotizacionCache.map((ci) => ({
+            id: ci.id,
+            descripcion: ci.descripcion,
+            unidad: ci.unidad,
+            cantidad: ci.cantidad,
+            valor_unitario: ci.precio_unitario,
+            valor_total: ci.subtotal,
+          })),
+          itemTipo: "cotizacion",
+          valorContratoTotal: Number(proyecto.valor_total || 0),
           variante: "cliente",
         });
       });
@@ -1127,13 +1389,24 @@
     card.querySelectorAll(".btn-pdf-corte-contratista").forEach((btn) => {
       btn.addEventListener("click", () => {
         if (typeof generarActaCortePDF !== "function") return mostrarAviso("El generador de PDF aún no está disponible", "error");
+        const contratistaId = btn.dataset.contratistaId;
+        const itemsContratista = presupuestoCache.filter((pi) => pi.tipo === "MO" && pi.contratista_id === contratistaId);
         generarActaCortePDF({
           proyecto,
           corte,
           todosLosCortes: todosLosCortesCache,
-          presupuestoCache,
+          items: itemsContratista.map((pi) => ({
+            id: pi.id,
+            descripcion: pi.descripcion,
+            unidad: pi.unidad,
+            cantidad: pi.cantidad,
+            valor_unitario: pi.valor_unitario,
+            valor_total: pi.valor_total,
+          })),
+          itemTipo: "mano_obra",
+          valorContratoTotal: itemsContratista.reduce((a, pi) => a + Number(pi.valor_total || 0), 0),
           variante: "contratista",
-          contratistaId: btn.dataset.contratistaId,
+          contratistaId,
           contratistasCache,
         });
       });
@@ -1170,7 +1443,7 @@
   async function cargarTareas() {
     const { data, error } = await window.sb
       .from("tareas")
-      .select("*, presupuesto_items(descripcion, valor_total)")
+      .select("*, cotizacion_items(descripcion, subtotal)")
       .eq("proyecto_id", proyectoId)
       .order("orden");
     if (error) return manejarError(error, "No se pudo cargar las tareas");
@@ -1183,7 +1456,7 @@
     return `
       <div class="tarea-card cursor-move rounded-lg border border-gray-200 bg-white p-2.5 text-xs shadow-sm" draggable="true" data-tarea-id="${t.id}">
         <p class="font-semibold text-gray-800">${escapeHtml(t.titulo)}</p>
-        ${t.presupuesto_items?.descripcion ? `<p class="mt-0.5 text-[11px] text-gray-400">Vinculada a: ${escapeHtml(t.presupuesto_items.descripcion)}</p>` : ""}
+        ${t.cotizacion_items?.descripcion ? `<p class="mt-0.5 text-[11px] text-gray-400">Vinculada a: ${escapeHtml(t.cotizacion_items.descripcion)}</p>` : ""}
         <div class="mt-1.5 flex items-center justify-between text-[11px] text-gray-400">
           <span>${t.fecha_inicio ? formatoFecha(t.fecha_inicio) : "—"} → ${t.fecha_fin ? formatoFecha(t.fecha_fin) : "—"}</span>
           <button class="btn-borrar-tarea text-gray-300 hover:text-red-600" data-id="${t.id}">
@@ -1380,8 +1653,8 @@
   actualizarBotonesVistaTarea("kanban");
 
   function abrirModalTarea() {
-    const opcionesPresupuesto = presupuestoCache
-      .map((pi) => `<option value="${pi.id}">${escapeHtml(pi.descripcion)} (${formatoMoneda(pi.valor_total)})</option>`)
+    const opcionesCotizacion = cotizacionCache
+      .map((ci) => `<option value="${ci.id}">${escapeHtml(ci.descripcion)} (${formatoMoneda(ci.subtotal)})</option>`)
       .join("");
     const html = `
       <div id="modal-tarea" class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
@@ -1407,10 +1680,10 @@
               </div>
             </div>
             <div>
-              <label class="mb-1 block text-xs font-medium text-gray-700">Renglón del presupuesto (define su peso en el % de avance)</label>
-              <select id="t-presupuesto-item" class="w-full rounded-lg border-gray-300 text-sm">
+              <label class="mb-1 block text-xs font-medium text-gray-700">Renglón de la cotización (define su peso en el % de avance)</label>
+              <select id="t-cotizacion-item" class="w-full rounded-lg border-gray-300 text-sm">
                 <option value="">— Ninguno (usar peso manual) —</option>
-                ${opcionesPresupuesto}
+                ${opcionesCotizacion}
               </select>
             </div>
             <div>
@@ -1444,7 +1717,7 @@
         descripcion: document.getElementById("t-descripcion").value.trim() || null,
         fecha_inicio: document.getElementById("t-inicio").value || null,
         fecha_fin: document.getElementById("t-fin").value || null,
-        presupuesto_item_id: document.getElementById("t-presupuesto-item").value || null,
+        cotizacion_item_id: document.getElementById("t-cotizacion-item").value || null,
         peso_manual: Number(document.getElementById("t-peso-manual").value || 1),
         estado: document.getElementById("t-estado").value,
         orden: tareasCache.length,
@@ -1464,9 +1737,10 @@
   // --------------------------------------------------------------------
   const CATEGORIAS_DOCUMENTO = {
     contrato: "Contrato",
-    cotizacion: "Cotización",
-    orden_compra: "Orden de Compra",
+    cotizacion: "Cotización Final",
     planos: "Planos",
+    polizas: "Pólizas",
+    orden_compra: "Orden de Compra",
     acta_entrega: "Acta de Entrega",
     corte: "Corte",
     otro: "Otro",
@@ -1604,7 +1878,7 @@
   activarCamposMoneda();
   await cargarProyecto();
   await cargarContratistasSelectPresupuesto();
-  await cargarPresupuesto();
+  await Promise.all([cargarCotizacion(), cargarPresupuesto()]);
   await Promise.all([
     cargarFacturas(),
     cargarProveedoresSelect().then(cargarCompras),
