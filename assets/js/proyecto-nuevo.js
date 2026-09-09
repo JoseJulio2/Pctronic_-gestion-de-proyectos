@@ -7,6 +7,12 @@
 
   let contratistasCache = [];
   let proyectoId = null;
+  // Declaradas aquí (arriba) y no más abajo junto a su sección: se usan desde
+  // actualizarTotalesCotizacion(), que se llama una vez al cargar la página
+  // (antes de llegar al Paso 2) — si estuvieran declaradas con `let` más abajo,
+  // esa primera llamada lanzaría "Cannot access before initialization" y
+  // detendría todo el script, incluyendo el listener del botón "Continuar".
+  let cotizacionCache = [];
 
   // --------------------------------------------------------------------
   // Tipo de proyecto (multi-selección con checkboxes)
@@ -211,7 +217,6 @@
   // ======================================================================
   // COTIZACIÓN
   // ======================================================================
-  let cotizacionCache = [];
 
   function actualizarTotalesCotizacion() {
     const subtotal = cotizacionCache.reduce((a, r) => a + Number(r.cantidad || 0) * Number(r.precio_unitario || 0), 0);
