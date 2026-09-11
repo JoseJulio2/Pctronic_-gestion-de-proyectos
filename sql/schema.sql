@@ -92,6 +92,7 @@ create table public.empresas (
   id uuid primary key default gen_random_uuid(),
   nombre text not null,
   nit text,
+  direccion text,
   telefono text,
   email text,
   logo_url text,
@@ -300,6 +301,11 @@ create table public.compras (
   categoria text not null default 'materiales'
     check (categoria in ('materiales','mano_obra','equipos','alquiler','otros')),
   descripcion text not null,
+  -- Vínculo opcional a un renglón del presupuesto (Sección 7) para poder
+  -- trazar el gasto real ítem por ítem, no solo por categoría agregada.
+  presupuesto_item_id uuid references public.presupuesto_items(id) on delete set null,
+  numero_factura text,
+  factura_url text,
   valor_antes_iva numeric(14,2) not null default 0,
   iva_porcentaje numeric(5,2) not null default 19,
   valor numeric(14,2) generated always as (valor_antes_iva * (1 + coalesce(iva_porcentaje,0)/100.0)) stored,
@@ -400,6 +406,10 @@ create table public.documentos (
   proyecto_id uuid not null references public.proyectos(id) on delete cascade,
   categoria text not null default 'otro'
     check (categoria in ('contrato','cotizacion','orden_compra','planos','polizas','acta_entrega','corte','otro')),
+  -- Si el documento es una factura/soporte adjuntado desde un Corte de
+  -- Cliente específico (pestaña Cortes → Corte de Cliente), queda vinculado
+  -- aquí para poder listarlo junto a ese corte y en su Acta en PDF.
+  corte_id uuid references public.ejecucion_cortes(id) on delete cascade,
   nombre_archivo text not null,
   url text not null,
   subido_por uuid references public.profiles(id) on delete set null,
@@ -407,13 +417,16 @@ create table public.documentos (
 );
 
 -- ----------------------------------------------------------------------------
--- 11C. TAREAS / EJECUCIÓN ESTILO ASANA (Kanban + Gantt)
+-- 11C. CRONOGRAMA DE EJECUCIÓN (Vista de lista + Kanban + Gantt)
 -- ----------------------------------------------------------------------------
--- El avance del proyecto se calcula ponderando cada tarea por el valor de
--- venta del renglón de COTIZACIÓN que tenga vinculado (así el % de avance
--- refleja peso económico real frente al cliente); si no tiene cotización
--- vinculada, usa el renglón de presupuesto (costo) y si tampoco, el
--- peso_manual. Una tarea "hecha" aporta el 100% de su peso; el resto 0%.
+-- Cada tarea "pesa" según el valor económico del renglón que tenga vinculado:
+-- el de COTIZACIÓN (peso = valor de venta al cliente) tiene prioridad; si no
+-- hay, se usa el de PRESUPUESTO (peso = valor de costo); si tampoco, el
+-- peso_manual. Además cada tarea tiene su propio % de avance (0-100, no solo
+-- "hecha o no hecha"), así se puede reportar un avance parcial de una
+-- actividad larga. El % de avance del PROYECTO es el promedio ponderado de
+-- avance_pct de todas sus tareas, usando ese peso — el mismo principio de una
+-- curva S de obra: Σ(peso_i × avance_pct_i) / Σ(peso_i).
 create table public.tareas (
   id uuid primary key default gen_random_uuid(),
   proyecto_id uuid not null references public.proyectos(id) on delete cascade,
@@ -427,13 +440,14 @@ create table public.tareas (
   fecha_fin date,
   orden int not null default 0,
   peso_manual numeric(14,2),
+  avance_pct int not null default 0 check (avance_pct between 0 and 100),
   created_at timestamptz not null default now()
 );
 
 -- Recalcula el % de avance del proyecto cada vez que cambian sus tareas,
--- ponderando por el valor del renglón de presupuesto vinculado (o el peso
--- manual si no tiene renglón). No se puede hacer con una columna generada
--- porque necesita mirar varias filas de otra tabla.
+-- ponderando el avance_pct de cada una por el valor del renglón vinculado (o
+-- el peso manual si no tiene renglón). No se puede hacer con una columna
+-- generada porque necesita mirar varias filas de otra tabla.
 create or replace function public.recalcular_avance_proyecto()
 returns trigger
 language plpgsql
@@ -441,21 +455,21 @@ as $$
 declare
   v_proyecto_id uuid;
   v_total_peso numeric;
-  v_peso_hecho numeric;
+  v_peso_avanzado numeric;
   v_nuevo_avance int;
 begin
   v_proyecto_id := coalesce(new.proyecto_id, old.proyecto_id);
 
   select
     coalesce(sum(coalesce(ci.subtotal, pi.valor_total, t.peso_manual, 1)), 0),
-    coalesce(sum(case when t.estado = 'hecho' then coalesce(ci.subtotal, pi.valor_total, t.peso_manual, 1) else 0 end), 0)
-  into v_total_peso, v_peso_hecho
+    coalesce(sum(coalesce(ci.subtotal, pi.valor_total, t.peso_manual, 1) * coalesce(t.avance_pct, 0) / 100.0), 0)
+  into v_total_peso, v_peso_avanzado
   from public.tareas t
   left join public.cotizacion_items ci on ci.id = t.cotizacion_item_id
   left join public.presupuesto_items pi on pi.id = t.presupuesto_item_id
   where t.proyecto_id = v_proyecto_id;
 
-  v_nuevo_avance := case when v_total_peso > 0 then round((v_peso_hecho / v_total_peso) * 100) else 0 end;
+  v_nuevo_avance := case when v_total_peso > 0 then round((v_peso_avanzado / v_total_peso) * 100) else 0 end;
 
   update public.proyectos set avance_porcentaje = v_nuevo_avance where id = v_proyecto_id;
   return null;
@@ -521,6 +535,19 @@ begin
     execute format('create policy "authenticated_delete" on public.%I for delete to authenticated using (true);', t);
   end loop;
 end $$;
+
+-- Crear proyectos nuevos es una acción exclusiva del administrador (la app
+-- también lo valida en pantalla, pero la regla real vive aquí): se reemplaza
+-- la política genérica de inserción de "proyectos" por una que exige que el
+-- usuario autenticado tenga rol 'admin' en profiles. El resto de acciones
+-- sobre proyectos (ver, editar, borrar) siguen abiertas a cualquier usuario
+-- con cuenta, igual que las demás tablas.
+drop policy if exists "authenticated_insert" on public.proyectos;
+create policy "solo_admin_insert_proyectos" on public.proyectos
+  for insert to authenticated
+  with check (
+    exists (select 1 from public.profiles p where p.id = auth.uid() and p.rol = 'admin')
+  );
 
 -- ----------------------------------------------------------------------------
 -- 13. ALMACENAMIENTO (fotos de perfil)

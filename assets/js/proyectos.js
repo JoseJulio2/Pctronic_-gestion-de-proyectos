@@ -1,5 +1,12 @@
 (async () => {
-  await window.pctronicReady;
+  const { profile } = await window.pctronicReady;
+
+  // Crear proyectos es una acción exclusiva del administrador (el enlace
+  // viene oculto por defecto en el HTML; aquí solo se muestra si aplica).
+  if (profile?.rol === "admin") {
+    document.getElementById("link-nuevo-proyecto")?.classList.remove("hidden");
+    document.getElementById("link-nuevo-proyecto")?.classList.add("flex");
+  }
 
   let proyectosCache = [];
 

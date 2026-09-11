@@ -13,7 +13,7 @@
   async function cargar() {
     const { data, error } = await window.sb
       .from("compras")
-      .select("*, proyectos(id, nombre), proveedores(nombre)")
+      .select("*, proyectos(id, nombre), proveedores(nombre), presupuesto_items(descripcion)")
       .order("fecha", { ascending: false });
     if (error) return manejarError(error, "No se pudo cargar las compras");
     cache = data || [];
@@ -68,25 +68,29 @@
           <td class="px-4 py-3">${escapeHtml(c.descripcion)}</td>
           <td class="px-4 py-3">${escapeHtml(c.proveedores?.nombre || "—")}</td>
           <td class="px-4 py-3"><span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold">${etiquetaCat[c.categoria]}</span></td>
+          <td class="px-4 py-3">
+            ${c.factura_url ? `<a href="${c.factura_url}" target="_blank" rel="noopener" class="font-medium text-primary hover:underline">${escapeHtml(c.numero_factura || "Ver factura")}</a>` : escapeHtml(c.numero_factura || "—")}
+          </td>
           <td class="px-4 py-3">${formatoFecha(c.fecha)}</td>
           <td class="px-4 py-3 font-medium">${formatoMoneda(c.valor)}</td>
         </tr>`
           )
           .join("")
-      : `<tr><td class="px-4 py-8 text-center text-gray-400" colspan="6">No hay compras para ese filtro.</td></tr>`;
+      : `<tr><td class="px-4 py-8 text-center text-gray-400" colspan="7">No hay compras para ese filtro.</td></tr>`;
   }
 
   document.getElementById("filtro-busqueda").addEventListener("input", render);
   document.getElementById("filtro-categoria").addEventListener("change", render);
   document.getElementById("filtro-mes").addEventListener("change", render);
 
-  const COLUMNAS_EXPORT = ["Proyecto", "Descripción", "Proveedor", "Categoría", "Fecha", "Valor"];
+  const COLUMNAS_EXPORT = ["Proyecto", "Descripción", "Proveedor", "Categoría", "N° Factura", "Fecha", "Valor"];
   function filasExport() {
     return ultimasFiltradas.map((c) => [
       c.proyectos?.nombre || "—",
       c.descripcion || "",
       c.proveedores?.nombre || "—",
       etiquetaCat[c.categoria] || c.categoria,
+      c.numero_factura || "—",
       formatoFecha(c.fecha),
       formatoMoneda(c.valor),
     ]);

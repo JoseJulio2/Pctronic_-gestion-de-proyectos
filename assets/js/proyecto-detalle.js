@@ -38,7 +38,7 @@
   async function cargarProyecto() {
     const { data, error } = await window.sb
       .from("proyectos")
-      .select("*, clientes(id, nombre), empresas(id, nombre, logo_url)")
+      .select("*, clientes(id, nombre), empresas(id, nombre, nit, telefono, email, direccion, logo_url)")
       .eq("id", proyectoId)
       .single();
 
@@ -461,6 +461,8 @@
   // PRESUPUESTO
   // --------------------------------------------------------------------
   let presupuestoCache = [];
+  let gastadoPorItemCache = {};
+  let filtroPresupuestoCategoria = ""; // "" = General (todas las categorías juntas)
 
   async function cargarContratistasSelectPresupuesto() {
     const { data } = await window.sb.from("contratistas").select("id, nombre").order("nombre");
@@ -500,6 +502,107 @@
     return acumulado;
   }
 
+  // Gastado real POR RENGLÓN (no solo por categoría): para Mano de Obra suma
+  // lo avanzado en ejecucion_items de todos los cortes; para el resto suma
+  // las Compras que se hayan vinculado explícitamente a ese renglón (campo
+  // "Renglón de presupuesto" del formulario de Compras). Una compra sin
+  // renglón vinculado sigue contando en el % por categoría de arriba, pero no
+  // aparece en la columna "Gastado" de un renglón específico.
+  async function calcularGastadoPorItem() {
+    const gastado = {};
+
+    const { data: cortes } = await window.sb.from("ejecucion_cortes").select("id").eq("proyecto_id", proyectoId);
+    const corteIds = (cortes || []).map((c) => c.id);
+    if (corteIds.length) {
+      const { data: items } = await window.sb
+        .from("ejecucion_items")
+        .select("valor_periodo, presupuesto_item_id")
+        .in("corte_id", corteIds)
+        .eq("item_tipo", "mano_obra");
+      (items || []).forEach((i) => {
+        if (!i.presupuesto_item_id) return;
+        gastado[i.presupuesto_item_id] = (gastado[i.presupuesto_item_id] || 0) + Number(i.valor_periodo || 0);
+      });
+    }
+
+    const { data: compras } = await window.sb
+      .from("compras")
+      .select("valor, presupuesto_item_id")
+      .eq("proyecto_id", proyectoId)
+      .not("presupuesto_item_id", "is", null);
+    (compras || []).forEach((c) => {
+      gastado[c.presupuesto_item_id] = (gastado[c.presupuesto_item_id] || 0) + Number(c.valor || 0);
+    });
+
+    return gastado;
+  }
+
+  function renderFiltroPresupuesto() {
+    const cont = document.getElementById("filtro-presupuesto-categoria");
+    if (!cont) return;
+    const opciones = [["", "General (todas)"], ...Object.entries(ETIQUETA_TIPO_ITEM)];
+    cont.innerHTML = opciones
+      .map(
+        ([val, label]) => `
+      <button type="button" class="btn-filtro-presupuesto rounded-full border px-3 py-1 text-xs font-semibold ${
+        filtroPresupuestoCategoria === val ? "border-primary bg-blue-50 text-primary" : "border-gray-300 text-gray-600 hover:bg-gray-50"
+      }" data-tipo="${val}">${label}</button>`
+      )
+      .join("");
+    cont.querySelectorAll(".btn-filtro-presupuesto").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        filtroPresupuestoCategoria = btn.dataset.tipo;
+        renderFiltroPresupuesto();
+        renderTablaPresupuesto();
+      })
+    );
+  }
+
+  function renderTablaPresupuesto() {
+    const filtrados = filtroPresupuestoCategoria
+      ? presupuestoCache.filter((i) => i.tipo === filtroPresupuestoCategoria)
+      : presupuestoCache;
+
+    document.getElementById("tabla-presupuesto").innerHTML = filtrados.length
+      ? filtrados
+          .map((item) => {
+            const gastado = gastadoPorItemCache[item.id] || 0;
+            const sobrepasado = gastado > Number(item.valor_total);
+            return `
+        <tr class="border-b border-gray-50 last:border-0">
+          <td class="px-4 py-2.5">
+            <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold">${ETIQUETA_TIPO_ITEM[item.tipo] || item.tipo}</span>
+            ${item.es_adicional ? '<span class="ml-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">Adicional</span>' : ""}
+          </td>
+          <td class="px-4 py-2.5">${escapeHtml(item.descripcion)}</td>
+          <td class="px-4 py-2.5">${escapeHtml(item.unidad || "un")}</td>
+          <td class="px-4 py-2.5">${item.cantidad}</td>
+          <td class="px-4 py-2.5">${formatoMoneda(item.valor_unitario)}</td>
+          <td class="px-4 py-2.5 font-medium">${formatoMoneda(item.valor_total)}</td>
+          <td class="px-4 py-2.5 ${sobrepasado ? "font-semibold text-red-600" : "text-gray-600"}">${gastado ? formatoMoneda(gastado) : "—"}</td>
+          <td class="px-4 py-2.5">${escapeHtml(item.contratistas?.nombre || "—")}</td>
+          <td class="px-4 py-2.5 text-right">
+            <button class="btn-borrar-item text-gray-400 hover:text-red-600" data-id="${item.id}">
+              <span class="material-symbols-outlined text-[18px]">delete</span>
+            </button>
+          </td>
+        </tr>`;
+          })
+          .join("")
+      : `<tr><td class="px-4 py-6 text-center text-gray-400" colspan="9">${
+          filtroPresupuestoCategoria ? "No hay renglones en esta categoría." : "Aún no has agregado renglones al presupuesto."
+        }</td></tr>`;
+
+    document.querySelectorAll(".btn-borrar-item").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        if (!confirm("¿Borrar este renglón del presupuesto?")) return;
+        const { error } = await window.sb.from("presupuesto_items").delete().eq("id", btn.dataset.id);
+        if (error) return manejarError(error, "No se pudo borrar");
+        cargarPresupuesto();
+      })
+    );
+  }
+
   async function cargarPresupuesto() {
     const { data, error } = await window.sb
       .from("presupuesto_items")
@@ -524,7 +627,8 @@
     document.getElementById("presu-total-otro").textContent = formatoMoneda(totalOtro);
     document.getElementById("presu-total-general").textContent = formatoMoneda(totalGeneral);
 
-    const ejecutadoPorTipo = await calcularEjecutadoPorTipo();
+    const [ejecutadoPorTipo, gastadoPorItem] = await Promise.all([calcularEjecutadoPorTipo(), calcularGastadoPorItem()]);
+    gastadoPorItemCache = gastadoPorItem;
     const pintarPct = (sufijo, ejecutado, presupuestado) => {
       const pct = presupuestado > 0 ? Math.min(100, Math.round((ejecutado / presupuestado) * 100)) : 0;
       const barra = document.getElementById(`presu-pct-${sufijo}`);
@@ -540,39 +644,8 @@
     const totalEjecutado = Object.values(ejecutadoPorTipo).reduce((a, v) => a + v, 0);
     pintarPct("general", totalEjecutado, totalGeneral);
 
-    document.getElementById("tabla-presupuesto").innerHTML = presupuestoCache.length
-      ? presupuestoCache
-          .map(
-            (item) => `
-        <tr class="border-b border-gray-50 last:border-0">
-          <td class="px-4 py-2.5">
-            <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold">${ETIQUETA_TIPO_ITEM[item.tipo] || item.tipo}</span>
-            ${item.es_adicional ? '<span class="ml-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">Adicional</span>' : ""}
-          </td>
-          <td class="px-4 py-2.5">${escapeHtml(item.descripcion)}</td>
-          <td class="px-4 py-2.5">${escapeHtml(item.unidad || "un")}</td>
-          <td class="px-4 py-2.5">${item.cantidad}</td>
-          <td class="px-4 py-2.5">${formatoMoneda(item.valor_unitario)}</td>
-          <td class="px-4 py-2.5 font-medium">${formatoMoneda(item.valor_total)}</td>
-          <td class="px-4 py-2.5">${escapeHtml(item.contratistas?.nombre || "—")}</td>
-          <td class="px-4 py-2.5 text-right">
-            <button class="btn-borrar-item text-gray-400 hover:text-red-600" data-id="${item.id}">
-              <span class="material-symbols-outlined text-[18px]">delete</span>
-            </button>
-          </td>
-        </tr>`
-          )
-          .join("")
-      : `<tr><td class="px-4 py-6 text-center text-gray-400" colspan="8">Aún no has agregado renglones al presupuesto.</td></tr>`;
-
-    document.querySelectorAll(".btn-borrar-item").forEach((btn) =>
-      btn.addEventListener("click", async () => {
-        if (!confirm("¿Borrar este renglón del presupuesto?")) return;
-        const { error } = await window.sb.from("presupuesto_items").delete().eq("id", btn.dataset.id);
-        if (error) return manejarError(error, "No se pudo borrar");
-        cargarPresupuesto();
-      })
-    );
+    renderFiltroPresupuesto();
+    renderTablaPresupuesto();
   }
 
   document.getElementById("form-presupuesto-item").addEventListener("submit", async (e) => {
@@ -721,6 +794,12 @@
   // --------------------------------------------------------------------
   // COMPRAS
   // --------------------------------------------------------------------
+  // Cada categoría de compra corresponde a un tipo de renglón del presupuesto,
+  // así el selector "Renglón de presupuesto" solo ofrece los que tienen
+  // sentido según la categoría elegida (evita vincular una compra de
+  // Materiales a un renglón de Mano de Obra, por ejemplo).
+  const CATEGORIA_COMPRA_A_TIPO_PRESUPUESTO = { materiales: "MP", equipos: "EQUIPO", alquiler: "ALQUILER", otros: "OTRO", mano_obra: "MO" };
+
   async function cargarProveedoresSelect() {
     const { data } = await window.sb.from("proveedores").select("id, nombre").order("nombre");
     const sel = document.getElementById("compra-proveedor");
@@ -729,10 +808,22 @@
       (data || []).map((p) => `<option value="${p.id}">${escapeHtml(p.nombre)}</option>`).join("");
   }
 
+  function actualizarSelectPresupuestoCompra() {
+    const sel = document.getElementById("compra-presupuesto-item");
+    if (!sel) return;
+    const tipo = CATEGORIA_COMPRA_A_TIPO_PRESUPUESTO[document.getElementById("compra-categoria").value];
+    const opciones = presupuestoCache.filter((i) => i.tipo === tipo);
+    sel.innerHTML =
+      `<option value="">— Sin vincular —</option>` +
+      opciones.map((i) => `<option value="${i.id}">${escapeHtml(i.descripcion)} (${formatoMoneda(i.valor_total)})</option>`).join("");
+  }
+  document.getElementById("compra-categoria").addEventListener("change", actualizarSelectPresupuestoCompra);
+
   async function cargarCompras() {
+    actualizarSelectPresupuestoCompra();
     const { data, error } = await window.sb
       .from("compras")
-      .select("*, proveedores(nombre)")
+      .select("*, proveedores(nombre), presupuesto_items(descripcion)")
       .eq("proyecto_id", proyectoId)
       .order("fecha", { ascending: false });
     if (error) return manejarError(error, "No se pudo cargar las compras");
@@ -750,6 +841,10 @@
           <td class="px-4 py-2.5">${escapeHtml(c.descripcion)}</td>
           <td class="px-4 py-2.5">${escapeHtml(c.proveedores?.nombre || "—")}</td>
           <td class="px-4 py-2.5"><span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold">${etiquetaCat[c.categoria] || c.categoria}</span></td>
+          <td class="px-4 py-2.5">
+            ${c.factura_url ? `<a href="${c.factura_url}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 font-medium text-primary hover:underline"><span class="material-symbols-outlined text-[16px]">attach_file</span>${escapeHtml(c.numero_factura || "Ver factura")}</a>` : escapeHtml(c.numero_factura || "—")}
+          </td>
+          <td class="px-4 py-2.5 text-xs text-gray-500">${escapeHtml(c.presupuesto_items?.descripcion || "—")}</td>
           <td class="px-4 py-2.5">${formatoFecha(c.fecha)}</td>
           <td class="px-4 py-2.5 font-medium">${formatoMoneda(c.valor)}</td>
           <td class="px-4 py-2.5 text-right">
@@ -760,7 +855,7 @@
         </tr>`
           )
           .join("")
-      : `<tr><td class="px-4 py-6 text-center text-gray-400" colspan="6">No hay compras registradas para este proyecto.</td></tr>`;
+      : `<tr><td class="px-4 py-6 text-center text-gray-400" colspan="8">No hay compras registradas para este proyecto.</td></tr>`;
 
     document.querySelectorAll(".btn-borrar-compra").forEach((btn) =>
       btn.addEventListener("click", async () => {
@@ -775,19 +870,54 @@
   document.getElementById("form-compra").addEventListener("submit", async (e) => {
     e.preventDefault();
     const valorAntesIva = valorMoneda(document.getElementById("compra-valor"));
+    const btnGuardar = e.target.querySelector("button[type=submit], button:not([type])");
+
+    // Si hay archivo de factura, se sube primero al bucket "documentos" (misma
+    // carpeta del proyecto, dentro de una subcarpeta "compras").
+    const inputArchivo = document.getElementById("compra-archivo-factura");
+    const archivo = inputArchivo.files[0];
+    let facturaUrl = null;
+    if (archivo) {
+      if (btnGuardar) {
+        btnGuardar.disabled = true;
+        btnGuardar.textContent = "Subiendo…";
+      }
+      const ruta = `${proyectoId}/compras/${Date.now()}_${archivo.name}`;
+      const { error: errorSubida } = await window.sb.storage.from("documentos").upload(ruta, archivo, { upsert: true });
+      if (errorSubida) {
+        manejarError(errorSubida, "No se pudo subir la factura adjunta");
+        if (btnGuardar) {
+          btnGuardar.disabled = false;
+          btnGuardar.textContent = "+";
+        }
+        return;
+      }
+      facturaUrl = window.sb.storage.from("documentos").getPublicUrl(ruta).data.publicUrl;
+    }
+
     const payload = {
       proyecto_id: proyectoId,
       proveedor_id: document.getElementById("compra-proveedor").value || null,
       categoria: document.getElementById("compra-categoria").value,
       descripcion: document.getElementById("compra-descripcion").value.trim(),
+      presupuesto_item_id: document.getElementById("compra-presupuesto-item").value || null,
+      numero_factura: document.getElementById("compra-numero-factura").value.trim() || null,
+      factura_url: facturaUrl,
       valor_antes_iva: valorAntesIva,
       iva_porcentaje: Number(document.getElementById("compra-iva")?.value ?? 19),
       fecha: document.getElementById("compra-fecha").value || new Date().toISOString().slice(0, 10),
     };
     const { error } = await window.sb.from("compras").insert(payload);
+    if (btnGuardar) {
+      btnGuardar.disabled = false;
+      btnGuardar.textContent = "+";
+    }
     if (error) return manejarError(error, "No se pudo registrar la compra");
     e.target.reset();
+    document.getElementById("compra-iva").value = 19;
+    actualizarSelectPresupuestoCompra();
     cargarCompras();
+    cargarPresupuesto();
   });
 
   // --------------------------------------------------------------------
@@ -992,9 +1122,30 @@
   });
 
   // --------------------------------------------------------------------
-  // EJECUCIÓN / AVANCE DE OBRA
+  // EJECUCIÓN / AVANCE (Corte de Cliente y Corte de Mano de Obra — dos
+  // subpestañas independientes que NO mezclan tablas ni acciones, aunque por
+  // debajo comparten el mismo "periodo de corte" (misma fecha de corte para
+  // ambos lados, que es lo habitual en obra: un corte, dos actas distintas).
   // --------------------------------------------------------------------
   let todosLosCortesCache = [];
+  let documentosPorCorteCache = {};
+
+  function activarSubtabCorte(tab) {
+    document.querySelectorAll(".subtab-corte-btn").forEach((btn) => {
+      const activo = btn.dataset.subtabCorte === tab;
+      btn.classList.toggle("border-primary", activo);
+      btn.classList.toggle("text-primary", activo);
+      btn.classList.toggle("border-transparent", !activo);
+      btn.classList.toggle("text-gray-500", !activo);
+    });
+    document.querySelectorAll("[data-subtab-corte-panel]").forEach((panel) => {
+      panel.classList.toggle("hidden", panel.dataset.subtabCortePanel !== tab);
+    });
+  }
+  document.querySelectorAll(".subtab-corte-btn").forEach((btn) =>
+    btn.addEventListener("click", () => activarSubtabCorte(btn.dataset.subtabCorte))
+  );
+  activarSubtabCorte("cliente");
 
   async function cargarCortesEjecucion() {
     const { data: cortes, error } = await window.sb
@@ -1003,22 +1154,39 @@
       .eq("proyecto_id", proyectoId)
       .order("numero_corte", { ascending: false });
     if (error) return manejarError(error, "No se pudo cargar la ejecución");
-
     todosLosCortesCache = cortes || [];
-    const cont = document.getElementById("lista-cortes");
-    if (!cortes.length) {
-      cont.innerHTML = `<p class="rounded-xl border border-dashed border-gray-300 p-6 text-center text-gray-400">Aún no has creado ningún corte de obra. Crea uno para registrar avances/instalaciones.</p>`;
+
+    const { data: documentosCortes } = await window.sb
+      .from("documentos")
+      .select("*")
+      .eq("proyecto_id", proyectoId)
+      .not("corte_id", "is", null);
+    documentosPorCorteCache = {};
+    (documentosCortes || []).forEach((d) => {
+      (documentosPorCorteCache[d.corte_id] ||= []).push(d);
+    });
+
+    const contCliente = document.getElementById("lista-cortes-cliente");
+    const contMO = document.getElementById("lista-cortes-mo");
+    if (!todosLosCortesCache.length) {
+      const vacio = `<p class="rounded-xl border border-dashed border-gray-300 p-6 text-center text-gray-400">Aún no has creado ningún corte. Crea uno desde "Corte de Cliente" para empezar a registrar avances.</p>`;
+      contCliente.innerHTML = vacio;
+      contMO.innerHTML = vacio;
       return;
     }
 
-    cont.innerHTML = cortes.map((corte) => renderCorteCard(corte, cortes)).join("");
+    contCliente.innerHTML = todosLosCortesCache.map((corte) => renderCorteCardCliente(corte, todosLosCortesCache)).join("");
+    contMO.innerHTML = todosLosCortesCache.map((corte) => renderCorteCardMO(corte, todosLosCortesCache)).join("");
 
-    cortes.forEach((corte) => conectarEventosCorte(corte));
+    todosLosCortesCache.forEach((corte) => {
+      conectarEventosCorteCliente(corte);
+      conectarEventosCorteMO(corte);
+    });
   }
 
   // Cantidad acumulada ejecutada de un renglón hasta (e incluyendo) el corte dado,
   // sumando todos los cortes con numero_corte <= corte.numero_corte.
-  // itemTipo: 'cotizacion' (Corte de Obra) | 'mano_obra' (Corte de Contratista)
+  // itemTipo: 'cotizacion' (Corte de Cliente) | 'mano_obra' (Corte de Mano de Obra)
   function acumuladoHasta(itemId, itemTipo, corte, todosLosCortes) {
     const campo = itemTipo === "cotizacion" ? "cotizacion_item_id" : "presupuesto_item_id";
     return todosLosCortes
@@ -1029,74 +1197,65 @@
       }, 0);
   }
 
-  function renderCorteCard(corte, todosLosCortes) {
-    const items = corte.ejecucion_items || [];
-    const itemsObra = items.filter((i) => i.item_tipo === "cotizacion");
-    const itemsMO = items.filter((i) => i.item_tipo === "mano_obra");
+  function filaCorteHtml({ id, descripcion, extra, cantidad, unidad, acumulado, pendiente, valorUnitario, cantidadActual, valorActual, dataAttrs }) {
+    return `
+      <tr ${dataAttrs}>
+        <td class="py-1.5 pr-3">${escapeHtml(descripcion)}</td>
+        ${extra !== undefined ? `<td class="py-1.5 pr-3">${extra}</td>` : ""}
+        <td class="py-1.5 pr-3">${cantidad} ${escapeHtml(unidad || "")}</td>
+        <td class="py-1.5 pr-3">${acumulado} ${escapeHtml(unidad || "")}</td>
+        <td class="py-1.5 pr-3 ${pendiente < 0 ? "text-red-600 font-semibold" : ""}">${pendiente} ${escapeHtml(unidad || "")}</td>
+        <td class="py-1.5 pr-3">${formatoMoneda(valorUnitario)}</td>
+        <td class="py-1.5 pr-3">
+          <input type="number" min="0" step="0.01" class="input-cantidad-corte w-24 rounded-lg border-gray-300 text-xs"
+            value="${cantidadActual || ""}" placeholder="0" data-valor-unitario="${valorUnitario}" />
+        </td>
+        <td class="py-1.5 pr-3 valor-linea-corte">${formatoMoneda(valorActual)}</td>
+      </tr>`;
+  }
+
+  // ---------------------- CORTE DE CLIENTE ----------------------
+  function renderCorteCardCliente(corte, todosLosCortes) {
+    const itemsObra = (corte.ejecucion_items || []).filter((i) => i.item_tipo === "cotizacion");
     const totalObra = itemsObra.reduce((a, i) => a + Number(i.valor_periodo || 0), 0);
     const yaFacturado = (corte.ejecucion_generaciones || []).some((g) => g.tipo === "factura");
-    const moDelPresupuesto = presupuestoCache.filter((pi) => pi.tipo === "MO");
-    const contratistasEnCorte = [...new Set(itemsMO.map((i) => i.presupuesto_items?.contratista_id).filter(Boolean))];
+    const documentos = documentosPorCorteCache[corte.id] || [];
 
     const filaObra = (ci) => {
       const existente = itemsObra.find((i) => i.cotizacion_item_id === ci.id);
       const acumulado = acumuladoHasta(ci.id, "cotizacion", corte, todosLosCortes);
-      const pendiente = Number(ci.cantidad) - acumulado;
-      return `
-      <tr data-cotizacion-item-id="${ci.id}" data-item-tipo="cotizacion" data-ejecucion-item-id="${existente ? existente.id : ""}">
-        <td class="py-1.5 pr-3">${escapeHtml(ci.descripcion)}</td>
-        <td class="py-1.5 pr-3">${ci.cantidad} ${escapeHtml(ci.unidad || "")}</td>
-        <td class="py-1.5 pr-3">${acumulado} ${escapeHtml(ci.unidad || "")}</td>
-        <td class="py-1.5 pr-3 ${pendiente < 0 ? "text-red-600 font-semibold" : ""}">${pendiente} ${escapeHtml(ci.unidad || "")}</td>
-        <td class="py-1.5 pr-3">${formatoMoneda(ci.precio_unitario)}</td>
-        <td class="py-1.5 pr-3">
-          <input type="number" min="0" step="0.01" class="input-cantidad-corte w-24 rounded-lg border-gray-300 text-xs"
-            value="${existente ? existente.cantidad_periodo : ""}" placeholder="0" data-valor-unitario="${ci.precio_unitario}" />
-        </td>
-        <td class="py-1.5 pr-3 valor-linea-corte">${formatoMoneda(existente ? existente.valor_periodo : 0)}</td>
-      </tr>`;
-    };
-
-    const filaMO = (pi) => {
-      const existente = itemsMO.find((i) => i.presupuesto_item_id === pi.id);
-      const acumulado = acumuladoHasta(pi.id, "mano_obra", corte, todosLosCortes);
-      const pendiente = Number(pi.cantidad) - acumulado;
-      return `
-      <tr data-presupuesto-item-id="${pi.id}" data-item-tipo="mano_obra" data-ejecucion-item-id="${existente ? existente.id : ""}">
-        <td class="py-1.5 pr-3">${escapeHtml(pi.descripcion)}</td>
-        <td class="py-1.5 pr-3">${escapeHtml(pi.contratistas?.nombre || "—")}</td>
-        <td class="py-1.5 pr-3">${pi.cantidad} ${escapeHtml(pi.unidad || "")}</td>
-        <td class="py-1.5 pr-3">${acumulado} ${escapeHtml(pi.unidad || "")}</td>
-        <td class="py-1.5 pr-3 ${pendiente < 0 ? "text-red-600 font-semibold" : ""}">${pendiente} ${escapeHtml(pi.unidad || "")}</td>
-        <td class="py-1.5 pr-3">${formatoMoneda(pi.valor_unitario)}</td>
-        <td class="py-1.5 pr-3">
-          <input type="number" min="0" step="0.01" class="input-cantidad-corte w-24 rounded-lg border-gray-300 text-xs"
-            value="${existente ? existente.cantidad_periodo : ""}" placeholder="0" data-valor-unitario="${pi.valor_unitario}" />
-        </td>
-        <td class="py-1.5 pr-3 valor-linea-corte">${formatoMoneda(existente ? existente.valor_periodo : 0)}</td>
-      </tr>`;
+      return filaCorteHtml({
+        descripcion: ci.descripcion,
+        cantidad: ci.cantidad,
+        unidad: ci.unidad,
+        acumulado,
+        pendiente: Number(ci.cantidad) - acumulado,
+        valorUnitario: ci.precio_unitario,
+        cantidadActual: existente?.cantidad_periodo,
+        valorActual: existente?.valor_periodo || 0,
+        dataAttrs: `data-cotizacion-item-id="${ci.id}" data-item-tipo="cotizacion" data-ejecucion-item-id="${existente ? existente.id : ""}"`,
+      });
     };
 
     return `
-    <div class="rounded-xl border border-gray-200 bg-white p-4" data-corte-card="${corte.id}">
+    <div class="rounded-xl border border-gray-200 bg-white p-4" data-corte-cliente-card="${corte.id}">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p class="font-bold text-gray-900">Corte de Obra N° ${corte.numero_corte} — ${formatoFecha(corte.fecha_corte)}</p>
+          <p class="font-bold text-gray-900">Corte N° ${corte.numero_corte} — ${formatoFecha(corte.fecha_corte)}</p>
           <p class="text-xs text-gray-500">${escapeHtml(corte.descripcion || "")}</p>
         </div>
         <div class="flex items-center gap-4">
           <div class="text-right">
-            <p class="text-xs text-gray-500">Valor de este corte (Obra)</p>
+            <p class="text-xs text-gray-500">Valor de este corte</p>
             <p class="font-semibold text-primary">${formatoMoneda(totalObra)}</p>
           </div>
-          <button class="btn-toggle-corte rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">
-            Ver / editar avances
+          <button class="btn-toggle-corte-cliente rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">
+            Ver / editar avance
           </button>
         </div>
       </div>
 
-      <div class="hidden mt-4 border-t border-gray-100 pt-4 panel-corte">
-        <p class="mb-1 text-xs font-bold uppercase text-gray-500">Avance de Obra (Cotización → Factura Cliente)</p>
+      <div class="hidden mt-4 border-t border-gray-100 pt-4 panel-corte-cliente">
         <p class="mb-2 text-xs text-gray-500">Cantidades iniciales (de la cotización), acumulado ejecutado, pendiente y lo ejecutado en este corte.</p>
         <div class="overflow-x-auto">
           <table class="w-full text-left text-xs">
@@ -1121,7 +1280,219 @@
           </table>
         </div>
 
-        <p class="mb-1 mt-5 text-xs font-bold uppercase text-gray-500">Avance de Mano de Obra (Contratistas)</p>
+        <div class="mt-4 flex flex-wrap items-center justify-end gap-2">
+          <label class="flex cursor-pointer items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">
+            <span class="material-symbols-outlined text-[16px]">attach_file</span> Adjuntar factura/soporte del cliente
+            <input type="file" class="input-adjunto-corte-cliente hidden" />
+          </label>
+          <button class="btn-guardar-avance-cliente rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-gray-700">
+            Guardar avance
+          </button>
+          <button class="btn-generar-factura rounded-lg border border-primary px-3 py-1.5 text-xs font-semibold text-primary hover:bg-blue-50" ${yaFacturado ? "disabled" : ""}>
+            ${yaFacturado ? "Factura ya generada ✓" : "Generar factura al cliente"}
+          </button>
+          <button class="btn-pdf-corte-cliente rounded-lg border border-gray-400 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">
+            <span class="material-symbols-outlined align-middle text-[14px]">picture_as_pdf</span> Acta (Cliente)
+          </button>
+        </div>
+
+        ${
+          documentos.length
+            ? `<div class="mt-3 border-t border-gray-50 pt-3">
+                <p class="mb-1.5 text-[11px] font-bold uppercase text-gray-400">Facturas y soportes adjuntos</p>
+                <ul class="space-y-1 text-xs lista-adjuntos-corte">
+                  ${documentos
+                    .map(
+                      (d) => `
+                    <li class="flex items-center justify-between gap-2" data-doc-id="${d.id}">
+                      <a href="${d.url}" target="_blank" rel="noopener" class="flex items-center gap-1 text-primary hover:underline">
+                        <span class="material-symbols-outlined text-[14px]">description</span>${escapeHtml(d.nombre_archivo)}
+                      </a>
+                      <button class="btn-borrar-adjunto-corte text-gray-300 hover:text-red-600" data-id="${d.id}">
+                        <span class="material-symbols-outlined text-[14px]">delete</span>
+                      </button>
+                    </li>`
+                    )
+                    .join("")}
+                </ul>
+              </div>`
+            : ""
+        }
+      </div>
+    </div>`;
+  }
+
+  function conectarEventosCorteCliente(corte) {
+    const card = document.querySelector(`[data-corte-cliente-card="${corte.id}"]`);
+    if (!card) return;
+
+    card.querySelector(".btn-toggle-corte-cliente").addEventListener("click", () => {
+      card.querySelector(".panel-corte-cliente").classList.toggle("hidden");
+    });
+
+    card.querySelectorAll(".input-cantidad-corte").forEach((input) => {
+      input.addEventListener("input", () => {
+        const fila = input.closest("tr");
+        const cantidad = Number(input.value || 0);
+        const valorUnitario = Number(input.dataset.valorUnitario || 0);
+        fila.querySelector(".valor-linea-corte").textContent = formatoMoneda(cantidad * valorUnitario);
+      });
+    });
+
+    card.querySelector(".btn-guardar-avance-cliente").addEventListener("click", async () => {
+      const filas = card.querySelectorAll(".tabla-items-corte-obra tr[data-cotizacion-item-id]");
+      const { actualizaciones, inserciones } = prepararGuardadoAvance(filas, corte.id, "cotizacion");
+      if (!actualizaciones.length && !inserciones.length) return mostrarAviso("No ingresaste ninguna cantidad para guardar", "error");
+
+      const resultados = await Promise.all([
+        ...actualizaciones,
+        inserciones.length ? window.sb.from("ejecucion_items").insert(inserciones) : Promise.resolve({ error: null }),
+      ]);
+      const error = resultados.find((r) => r.error)?.error;
+      if (error) return manejarError(error, "No se pudo guardar el avance");
+      mostrarAviso("Avance de cliente guardado", "exito");
+      cargarCortesEjecucion();
+    });
+
+    card.querySelector(".btn-generar-factura").addEventListener("click", async () => {
+      if (card.querySelector(".btn-generar-factura").disabled) return;
+      const items = (corte.ejecucion_items || []).filter((i) => i.item_tipo === "cotizacion");
+      const total = items.reduce((a, i) => a + Number(i.valor_periodo || 0), 0);
+      if (total <= 0) return mostrarAviso("Este corte no tiene valor para facturar. Guarda el avance primero.", "error");
+      if (!confirm(`¿Generar una factura al cliente por ${formatoMoneda(total)} para el Corte N° ${corte.numero_corte}?`)) return;
+
+      const { data: factura, error: errorFactura } = await window.sb
+        .from("facturas")
+        .insert({
+          proyecto_id: proyectoId,
+          numero_factura: `Corte ${corte.numero_corte}`,
+          valor: total,
+          fecha_emision: new Date().toISOString().slice(0, 10),
+          estado: "pendiente",
+          notas: `Generada automáticamente desde el Corte de Cliente N° ${corte.numero_corte}`,
+        })
+        .select()
+        .single();
+      if (errorFactura) return manejarError(errorFactura, "No se pudo generar la factura");
+
+      const { error: errorGen } = await window.sb.from("ejecucion_generaciones").insert({
+        corte_id: corte.id,
+        tipo: "factura",
+        factura_id: factura.id,
+      });
+      if (errorGen) return manejarError(errorGen, "La factura se creó pero no se pudo registrar la generación");
+
+      mostrarAviso("Factura generada correctamente", "exito");
+      cargarCortesEjecucion();
+      cargarFacturas();
+    });
+
+    const btnPdfCliente = card.querySelector(".btn-pdf-corte-cliente");
+    if (btnPdfCliente) {
+      btnPdfCliente.addEventListener("click", () => {
+        if (typeof generarActaCortePDF !== "function") return mostrarAviso("El generador de PDF aún no está disponible", "error");
+        generarActaCortePDF({
+          proyecto,
+          corte,
+          todosLosCortes: todosLosCortesCache,
+          items: cotizacionCache.map((ci) => ({
+            id: ci.id,
+            descripcion: ci.descripcion,
+            unidad: ci.unidad,
+            cantidad: ci.cantidad,
+            valor_unitario: ci.precio_unitario,
+            valor_total: ci.subtotal,
+          })),
+          itemTipo: "cotizacion",
+          valorContratoTotal: Number(proyecto.valor_total || 0),
+          variante: "cliente",
+          documentosAdjuntos: documentosPorCorteCache[corte.id] || [],
+        });
+      });
+    }
+
+    const inputAdjunto = card.querySelector(".input-adjunto-corte-cliente");
+    if (inputAdjunto) {
+      inputAdjunto.addEventListener("change", async () => {
+        const file = inputAdjunto.files[0];
+        if (!file) return;
+        const ruta = `${proyectoId}/cortes/${corte.id}/${Date.now()}_${file.name}`;
+        const { error: errorSubida } = await window.sb.storage.from("documentos").upload(ruta, file, { upsert: true });
+        if (errorSubida) return manejarError(errorSubida, "No se pudo subir el adjunto");
+        const { data: publicUrlData } = window.sb.storage.from("documentos").getPublicUrl(ruta);
+        const { error: errorInsert } = await window.sb.from("documentos").insert({
+          proyecto_id: proyectoId,
+          corte_id: corte.id,
+          categoria: "corte",
+          nombre_archivo: file.name,
+          url: publicUrlData.publicUrl,
+          subido_por: session.user.id,
+        });
+        if (errorInsert) return manejarError(errorInsert, "El archivo se subió pero no se pudo registrar");
+        mostrarAviso("Adjunto guardado", "exito");
+        cargarCortesEjecucion();
+        cargarDocumentos();
+      });
+    }
+
+    card.querySelectorAll(".btn-borrar-adjunto-corte").forEach((btn) =>
+      btn.addEventListener("click", async (e) => {
+        e.preventDefault();
+        if (!confirm("¿Borrar este adjunto?")) return;
+        const { error } = await window.sb.from("documentos").delete().eq("id", btn.dataset.id);
+        if (error) return manejarError(error, "No se pudo borrar");
+        cargarCortesEjecucion();
+        cargarDocumentos();
+      })
+    );
+  }
+
+  // ---------------------- CORTE DE MANO DE OBRA ----------------------
+  function renderCorteCardMO(corte, todosLosCortes) {
+    const itemsMO = (corte.ejecucion_items || []).filter((i) => i.item_tipo === "mano_obra");
+    const totalMO = itemsMO.reduce((a, i) => a + Number(i.valor_periodo || 0), 0);
+    const moDelPresupuesto = presupuestoCache.filter((pi) => pi.tipo === "MO");
+    const contratistasEnCorte = [...new Set(itemsMO.map((i) => i.presupuesto_items?.contratista_id).filter(Boolean))];
+    const generadosPrevios = new Set(
+      (corte.ejecucion_generaciones || []).filter((g) => g.tipo === "corte_contratista").map((g) => g.proyecto_contratista_id)
+    );
+
+    const filaMO = (pi) => {
+      const existente = itemsMO.find((i) => i.presupuesto_item_id === pi.id);
+      const acumulado = acumuladoHasta(pi.id, "mano_obra", corte, todosLosCortes);
+      return filaCorteHtml({
+        descripcion: pi.descripcion,
+        extra: escapeHtml(pi.contratistas?.nombre || "—"),
+        cantidad: pi.cantidad,
+        unidad: pi.unidad,
+        acumulado,
+        pendiente: Number(pi.cantidad) - acumulado,
+        valorUnitario: pi.valor_unitario,
+        cantidadActual: existente?.cantidad_periodo,
+        valorActual: existente?.valor_periodo || 0,
+        dataAttrs: `data-presupuesto-item-id="${pi.id}" data-item-tipo="mano_obra" data-ejecucion-item-id="${existente ? existente.id : ""}"`,
+      });
+    };
+
+    return `
+    <div class="rounded-xl border border-gray-200 bg-white p-4" data-corte-mo-card="${corte.id}">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p class="font-bold text-gray-900">Corte N° ${corte.numero_corte} — ${formatoFecha(corte.fecha_corte)}</p>
+          <p class="text-xs text-gray-500">${escapeHtml(corte.descripcion || "")}</p>
+        </div>
+        <div class="flex items-center gap-4">
+          <div class="text-right">
+            <p class="text-xs text-gray-500">Valor de este corte</p>
+            <p class="font-semibold text-primary">${formatoMoneda(totalMO)}</p>
+          </div>
+          <button class="btn-toggle-corte-mo rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">
+            Ver / editar avance
+          </button>
+        </div>
+      </div>
+
+      <div class="hidden mt-4 border-t border-gray-100 pt-4 panel-corte-mo">
         <p class="mb-2 text-xs text-gray-500">Cantidades iniciales (presupuesto de mano de obra), acumulado, pendiente y lo ejecutado en este corte.</p>
         <div class="overflow-x-auto">
           <table class="w-full text-left text-xs">
@@ -1147,40 +1518,32 @@
           </table>
         </div>
 
-        <div class="mt-3 flex flex-wrap items-center justify-end gap-2">
-          <button class="btn-guardar-avances rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-gray-700">
-            Guardar avances
-          </button>
-          <button class="btn-generar-factura rounded-lg border border-primary px-3 py-1.5 text-xs font-semibold text-primary hover:bg-blue-50" ${yaFacturado ? "disabled" : ""}>
-            ${yaFacturado ? "Factura ya generada ✓" : "Generar factura al cliente"}
+        <div class="mt-4 flex flex-wrap items-center justify-end gap-2">
+          <button class="btn-guardar-avance-mo rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-gray-700">
+            Guardar avance
           </button>
           <button class="btn-generar-cortes-contratista rounded-lg border border-gray-400 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50" ${contratistasEnCorte.length ? "" : "disabled"}>
-            Generar cortes de pago a contratistas
+            Generar cortes de pago
           </button>
-          <button class="btn-pdf-corte-cliente rounded-lg border border-gray-400 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">
-            <span class="material-symbols-outlined align-middle text-[14px]">picture_as_pdf</span> Acta (Cliente)
-          </button>
-          ${
-            contratistasEnCorte
-              .map(
-                (cid) => `
+          ${contratistasEnCorte
+            .map(
+              (cid) => `
           <button class="btn-pdf-corte-contratista rounded-lg border border-gray-400 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50" data-contratista-id="${cid}">
             <span class="material-symbols-outlined align-middle text-[14px]">picture_as_pdf</span> Acta (${escapeHtml(contratistasCache.find((c) => c.id === cid)?.nombre || "Contratista")})
           </button>`
-              )
-              .join("")
-          }
+            )
+            .join("")}
         </div>
       </div>
     </div>`;
   }
 
-  function conectarEventosCorte(corte) {
-    const card = document.querySelector(`[data-corte-card="${corte.id}"]`);
+  function conectarEventosCorteMO(corte) {
+    const card = document.querySelector(`[data-corte-mo-card="${corte.id}"]`);
     if (!card) return;
 
-    card.querySelector(".btn-toggle-corte").addEventListener("click", () => {
-      card.querySelector(".panel-corte").classList.toggle("hidden");
+    card.querySelector(".btn-toggle-corte-mo").addEventListener("click", () => {
+      card.querySelector(".panel-corte-mo").classList.toggle("hidden");
     });
 
     card.querySelectorAll(".input-cantidad-corte").forEach((input) => {
@@ -1192,43 +1555,9 @@
       });
     });
 
-    card.querySelector(".btn-guardar-avances").addEventListener("click", async () => {
-      // No usamos upsert(onConflict:...) porque el índice único de esta tabla
-      // es parcial (solo aplica a cotizacion_item_id o a presupuesto_item_id
-      // según el renglón) y Postgres no permite usarlo como objetivo de
-      // ON CONFLICT sin repetir su condición — así que actualizamos por id si
-      // el renglón ya existía, o insertamos uno nuevo si no.
-      const filas = [
-        ...card.querySelectorAll(".tabla-items-corte-obra tr[data-cotizacion-item-id]"),
-        ...card.querySelectorAll(".tabla-items-corte-mo tr[data-presupuesto-item-id]"),
-      ];
-      const actualizaciones = [];
-      const inserciones = [];
-      filas.forEach((fila) => {
-        const inputCantidad = fila.querySelector(".input-cantidad-corte");
-        const cantidad = Number(inputCantidad?.value || 0);
-        if (cantidad <= 0) return;
-        const valorUnitarioSnapshot = Number(inputCantidad.dataset.valorUnitario || 0);
-        const ejecucionItemId = fila.dataset.ejecucionItemId;
-        if (ejecucionItemId) {
-          actualizaciones.push(
-            window.sb
-              .from("ejecucion_items")
-              .update({ cantidad_periodo: cantidad, valor_unitario_snapshot: valorUnitarioSnapshot })
-              .eq("id", ejecucionItemId)
-          );
-        } else {
-          const itemTipo = fila.dataset.itemTipo;
-          inserciones.push({
-            corte_id: corte.id,
-            item_tipo: itemTipo,
-            cotizacion_item_id: itemTipo === "cotizacion" ? fila.dataset.cotizacionItemId : null,
-            presupuesto_item_id: itemTipo === "mano_obra" ? fila.dataset.presupuestoItemId : null,
-            cantidad_periodo: cantidad,
-            valor_unitario_snapshot: valorUnitarioSnapshot,
-          });
-        }
-      });
+    card.querySelector(".btn-guardar-avance-mo").addEventListener("click", async () => {
+      const filas = card.querySelectorAll(".tabla-items-corte-mo tr[data-presupuesto-item-id]");
+      const { actualizaciones, inserciones } = prepararGuardadoAvance(filas, corte.id, "mano_obra");
       if (!actualizaciones.length && !inserciones.length) return mostrarAviso("No ingresaste ninguna cantidad para guardar", "error");
 
       const resultados = await Promise.all([
@@ -1236,51 +1565,17 @@
         inserciones.length ? window.sb.from("ejecucion_items").insert(inserciones) : Promise.resolve({ error: null }),
       ]);
       const error = resultados.find((r) => r.error)?.error;
-      if (error) return manejarError(error, "No se pudo guardar los avances");
-      mostrarAviso("Avances guardados", "exito");
+      if (error) return manejarError(error, "No se pudo guardar el avance");
+      mostrarAviso("Avance de mano de obra guardado", "exito");
       cargarCortesEjecucion();
-    });
-
-    card.querySelector(".btn-generar-factura").addEventListener("click", async () => {
-      if (card.querySelector(".btn-generar-factura").disabled) return;
-      const items = (corte.ejecucion_items || []).filter((i) => i.item_tipo === "cotizacion");
-      const total = items.reduce((a, i) => a + Number(i.valor_periodo || 0), 0);
-      if (total <= 0) return mostrarAviso("Este corte no tiene valor de Obra para facturar. Guarda avances primero.", "error");
-      if (!confirm(`¿Generar una factura al cliente por ${formatoMoneda(total)} para el Corte N° ${corte.numero_corte}?`)) return;
-
-      const { data: factura, error: errorFactura } = await window.sb
-        .from("facturas")
-        .insert({
-          proyecto_id: proyectoId,
-          numero_factura: `Corte ${corte.numero_corte}`,
-          valor: total,
-          fecha_emision: new Date().toISOString().slice(0, 10),
-          estado: "pendiente",
-          notas: `Generada automáticamente desde el Corte de Ejecución N° ${corte.numero_corte}`,
-        })
-        .select()
-        .single();
-      if (errorFactura) return manejarError(errorFactura, "No se pudo generar la factura");
-
-      const { error: errorGen } = await window.sb.from("ejecucion_generaciones").insert({
-        corte_id: corte.id,
-        tipo: "factura",
-        factura_id: factura.id,
-      });
-      if (errorGen) return manejarError(errorGen, "La factura se creó pero no se pudo registrar la generación");
-
-      mostrarAviso("Factura generada correctamente", "exito");
-      cargarCortesEjecucion();
-      cargarFacturas();
+      cargarPresupuesto();
     });
 
     card.querySelector(".btn-generar-cortes-contratista").addEventListener("click", async () => {
       if (card.querySelector(".btn-generar-cortes-contratista").disabled) return;
       const items = (corte.ejecucion_items || []).filter((i) => i.item_tipo === "mano_obra");
       const generadosPrevios = new Set(
-        (corte.ejecucion_generaciones || [])
-          .filter((g) => g.tipo === "corte_contratista")
-          .map((g) => g.proyecto_contratista_id)
+        (corte.ejecucion_generaciones || []).filter((g) => g.tipo === "corte_contratista").map((g) => g.proyecto_contratista_id)
       );
 
       const porContratista = {};
@@ -1293,14 +1588,13 @@
       const contratistaIds = Object.keys(porContratista);
       if (!contratistaIds.length) return mostrarAviso("Ningún renglón de este corte tiene contratista asignado.", "error");
 
-      if (!confirm(`¿Generar cortes de pago para ${contratistaIds.length} contratista(s) con base en este corte de ejecución?`)) return;
+      if (!confirm(`¿Generar cortes de pago para ${contratistaIds.length} contratista(s) con base en este corte?`)) return;
 
       let generados = 0;
       for (const contratistaId of contratistaIds) {
         const bruto = porContratista[contratistaId];
         if (bruto <= 0) continue;
 
-        // Buscar o crear el vínculo proyecto_contratistas
         let { data: vinculo } = await window.sb
           .from("proyecto_contratistas")
           .select("id")
@@ -1323,7 +1617,6 @@
 
         if (generadosPrevios.has(vinculo.id)) continue;
 
-        const contratista = contratistasCache.find((c) => c.id === contratistaId);
         const { data: infoContratista } = await window.sb
           .from("contratistas")
           .select("porcentaje_retencion")
@@ -1363,29 +1656,6 @@
       cargarContratistasProyecto();
     });
 
-    const btnPdfCliente = card.querySelector(".btn-pdf-corte-cliente");
-    if (btnPdfCliente) {
-      btnPdfCliente.addEventListener("click", () => {
-        if (typeof generarActaCortePDF !== "function") return mostrarAviso("El generador de PDF aún no está disponible", "error");
-        generarActaCortePDF({
-          proyecto,
-          corte,
-          todosLosCortes: todosLosCortesCache,
-          items: cotizacionCache.map((ci) => ({
-            id: ci.id,
-            descripcion: ci.descripcion,
-            unidad: ci.unidad,
-            cantidad: ci.cantidad,
-            valor_unitario: ci.precio_unitario,
-            valor_total: ci.subtotal,
-          })),
-          itemTipo: "cotizacion",
-          valorContratoTotal: Number(proyecto.valor_total || 0),
-          variante: "cliente",
-        });
-      });
-    }
-
     card.querySelectorAll(".btn-pdf-corte-contratista").forEach((btn) => {
       btn.addEventListener("click", () => {
         if (typeof generarActaCortePDF !== "function") return mostrarAviso("El generador de PDF aún no está disponible", "error");
@@ -1413,6 +1683,42 @@
     });
   }
 
+  // Helper compartido: lee las filas de una tabla de corte (obra o MO) y arma
+  // las listas de actualizaciones/inserciones para "ejecucion_items". No
+  // usamos upsert(onConflict:...) porque el índice único de esta tabla es
+  // parcial (aplica solo a cotizacion_item_id O a presupuesto_item_id según
+  // el renglón) y Postgres no lo permite como objetivo de ON CONFLICT sin
+  // repetir su condición.
+  function prepararGuardadoAvance(filas, corteId, itemTipo) {
+    const actualizaciones = [];
+    const inserciones = [];
+    filas.forEach((fila) => {
+      const inputCantidad = fila.querySelector(".input-cantidad-corte");
+      const cantidad = Number(inputCantidad?.value || 0);
+      if (cantidad <= 0) return;
+      const valorUnitarioSnapshot = Number(inputCantidad.dataset.valorUnitario || 0);
+      const ejecucionItemId = fila.dataset.ejecucionItemId;
+      if (ejecucionItemId) {
+        actualizaciones.push(
+          window.sb
+            .from("ejecucion_items")
+            .update({ cantidad_periodo: cantidad, valor_unitario_snapshot: valorUnitarioSnapshot })
+            .eq("id", ejecucionItemId)
+        );
+      } else {
+        inserciones.push({
+          corte_id: corteId,
+          item_tipo: itemTipo,
+          cotizacion_item_id: itemTipo === "cotizacion" ? fila.dataset.cotizacionItemId : null,
+          presupuesto_item_id: itemTipo === "mano_obra" ? fila.dataset.presupuestoItemId : null,
+          cantidad_periodo: cantidad,
+          valor_unitario_snapshot: valorUnitarioSnapshot,
+        });
+      }
+    });
+    return { actualizaciones, inserciones };
+  }
+
   document.getElementById("btn-nuevo-corte").addEventListener("click", async () => {
     const { data: existentes } = await window.sb
       .from("ejecucion_cortes")
@@ -1433,30 +1739,87 @@
   });
 
   // --------------------------------------------------------------------
-  // TAREAS (Ejecución estilo Asana: Kanban + Gantt) — alimentan el % de avance
+  // CRONOGRAMA DE EJECUCIÓN (Vista de lista + Kanban + Gantt) — alimentan el
+  // % de avance ponderado del proyecto.
+  //
+  // METODOLOGÍA (curva S / valor ganado, aplicada a este cronograma):
+  // cada tarea representa un ítem de obra y "pesa" según su valor económico
+  // — el renglón de Cotización que tenga vinculado (peso = lo que se le
+  // cobra al cliente por eso) o, si no aplica, el renglón de Presupuesto de
+  // costos/mano de obra vinculado (peso = lo que cuesta ejecutarlo); si no
+  // tiene ninguno, se usa un peso manual. Cada tarea además tiene su propio
+  // % de avance (0-100, no solo "hecha o no hecha"), así se puede reportar
+  // un 30% o 70% de una actividad larga en vez de saltar de golpe a 100%.
+  // El avance del proyecto (columna proyectos.avance_porcentaje) se
+  // recalcula en la base de datos como:
+  //   Σ (peso_i × %avance_i) / Σ (peso_i)
+  // — el mismo principio de una curva S de obra: el ítem más caro pesa más
+  // en el avance total, sin importar cuántas tareas pequeñas estén "hechas".
+  // La vista Kanban sigue sirviendo para el flujo de trabajo (Por Hacer →
+  // En Progreso → Revisión → Hecho); la vista Gantt muestra fechas y, dentro
+  // de cada barra, el relleno de % avance; la Vista de lista es el resumen
+  // tipo curva S con el peso y el % de cada ítem uno debajo del otro.
   // --------------------------------------------------------------------
   let tareasCache = [];
   const ESTADOS_TAREA = { todo: "Por Hacer", en_progreso: "En Progreso", revision: "Revisión", hecho: "Hecho" };
   const GANTT_PX_POR_DIA = 26;
   let ganttDragState = null;
 
+  function pesoTarea(t) {
+    return Number(t.cotizacion_items?.subtotal ?? t.presupuesto_items?.valor_total ?? t.peso_manual ?? 1);
+  }
+
+  function actualizarKpiCronograma() {
+    const pct = proyecto?.avance_porcentaje || 0;
+    const barra = document.getElementById("cronograma-avance-barra");
+    const texto = document.getElementById("cronograma-avance-pct");
+    if (barra) barra.style.width = `${pct}%`;
+    if (texto) texto.textContent = `${pct}%`;
+  }
+
   async function cargarTareas() {
     const { data, error } = await window.sb
       .from("tareas")
-      .select("*, cotizacion_items(descripcion, subtotal)")
+      .select("*, cotizacion_items(descripcion, subtotal), presupuesto_items(descripcion, valor_total)")
       .eq("proyecto_id", proyectoId)
       .order("orden");
-    if (error) return manejarError(error, "No se pudo cargar las tareas");
+    if (error) return manejarError(error, "No se pudo cargar el cronograma");
     tareasCache = data || [];
+    renderListaTareas();
     renderKanban();
     renderGantt();
+    actualizarKpiCronograma();
+  }
+
+  // Tras cualquier cambio que dispare el trigger de recálculo en la base de
+  // datos, releemos el % de avance del proyecto y refrescamos el KPI y el
+  // encabezado (sin recargar toda la página).
+  async function refrescarAvanceProyecto() {
+    const { data } = await window.sb.from("proyectos").select("avance_porcentaje").eq("id", proyectoId).single();
+    if (data && proyecto) proyecto.avance_porcentaje = data.avance_porcentaje;
+    actualizarKpiCronograma();
+    cargarProyecto();
+  }
+
+  async function actualizarTarea(id, cambios) {
+    const { error } = await window.sb.from("tareas").update(cambios).eq("id", id);
+    if (error) manejarError(error, "No se pudo actualizar la tarea");
+    return !error;
   }
 
   function tarjetaTareaHtml(t) {
     return `
       <div class="tarea-card cursor-move rounded-lg border border-gray-200 bg-white p-2.5 text-xs shadow-sm" draggable="true" data-tarea-id="${t.id}">
         <p class="font-semibold text-gray-800">${escapeHtml(t.titulo)}</p>
-        ${t.cotizacion_items?.descripcion ? `<p class="mt-0.5 text-[11px] text-gray-400">Vinculada a: ${escapeHtml(t.cotizacion_items.descripcion)}</p>` : ""}
+        ${
+          t.cotizacion_items?.descripcion || t.presupuesto_items?.descripcion
+            ? `<p class="mt-0.5 text-[11px] text-gray-400">Vinculada a: ${escapeHtml(t.cotizacion_items?.descripcion || t.presupuesto_items?.descripcion)}</p>`
+            : ""
+        }
+        <div class="mt-1.5 flex items-center gap-1.5">
+          <input type="number" min="0" max="100" step="5" class="input-avance-tarea w-14 rounded border-gray-300 py-0.5 text-[11px]" value="${t.avance_pct ?? 0}" data-id="${t.id}" />
+          <span class="text-[10px] text-gray-400">% avance · peso ${formatoMoneda(pesoTarea(t))}</span>
+        </div>
         <div class="mt-1.5 flex items-center justify-between text-[11px] text-gray-400">
           <span>${t.fecha_inicio ? formatoFecha(t.fecha_inicio) : "—"} → ${t.fecha_fin ? formatoFecha(t.fecha_fin) : "—"}</span>
           <button class="btn-borrar-tarea text-gray-300 hover:text-red-600" data-id="${t.id}">
@@ -1464,6 +1827,22 @@
           </button>
         </div>
       </div>`;
+  }
+
+  function conectarInputAvance(input) {
+    // El input vive dentro de una tarjeta draggable (Kanban): sin esto, un
+    // clic para escribir el % dispararía sin querer el arrastre de la tarjeta.
+    input.addEventListener("mousedown", (e) => e.stopPropagation());
+    input.addEventListener("click", (e) => e.stopPropagation());
+    input.addEventListener("change", async () => {
+      const pct = Math.max(0, Math.min(100, Number(input.value || 0)));
+      input.value = pct;
+      const ok = await actualizarTarea(input.dataset.id, { avance_pct: pct });
+      if (ok) {
+        mostrarAviso("% de avance actualizado", "exito");
+        refrescarAvanceProyecto();
+      }
+    });
   }
 
   function renderKanban() {
@@ -1488,8 +1867,9 @@
         const { error } = await window.sb.from("tareas").delete().eq("id", card.dataset.tareaId);
         if (error) return manejarError(error, "No se pudo borrar la tarea");
         cargarTareas();
-        cargarProyecto();
+        refrescarAvanceProyecto();
       });
+      conectarInputAvance(card.querySelector(".input-avance-tarea"));
     });
 
     document.querySelectorAll(".kanban-lista").forEach((lista) => {
@@ -1500,12 +1880,87 @@
         const nuevoEstado = lista.dataset.estado;
         const tarea = tareasCache.find((t) => t.id === tareaId);
         if (!tarea || tarea.estado === nuevoEstado) return;
-        const { error } = await window.sb.from("tareas").update({ estado: nuevoEstado }).eq("id", tareaId);
+        // Mover a "Hecho" marca el % de avance en 100 automáticamente (se
+        // puede seguir ajustando manualmente después si hiciera falta).
+        const cambios = { estado: nuevoEstado };
+        if (nuevoEstado === "hecho") cambios.avance_pct = 100;
+        const { error } = await window.sb.from("tareas").update(cambios).eq("id", tareaId);
         if (error) return manejarError(error, "No se pudo mover la tarea");
         cargarTareas();
-        cargarProyecto();
+        refrescarAvanceProyecto();
       });
     });
+  }
+
+  // ---------------------- VISTA DE LISTA (resumen tipo curva S) ----------------------
+  function renderListaTareas() {
+    const cont = document.getElementById("tabla-lista-tareas");
+    if (!cont) return;
+    if (!tareasCache.length) {
+      cont.innerHTML = `<tr><td class="px-3 py-6 text-center text-gray-400" colspan="7">Aún no has agregado tareas al cronograma.</td></tr>`;
+      return;
+    }
+    const pesoTotal = tareasCache.reduce((a, t) => a + pesoTarea(t), 0) || 1;
+
+    cont.innerHTML = tareasCache
+      .map((t) => {
+        const peso = pesoTarea(t);
+        const pctPeso = (peso / pesoTotal) * 100;
+        const vinculo = t.cotizacion_items?.descripcion
+          ? `Cotización: ${escapeHtml(t.cotizacion_items.descripcion)}`
+          : t.presupuesto_items?.descripcion
+          ? `Presupuesto: ${escapeHtml(t.presupuesto_items.descripcion)}`
+          : "Peso manual";
+        return `
+        <tr class="border-b border-gray-50 last:border-0" data-fila-tarea-id="${t.id}">
+          <td class="px-3 py-2.5 font-medium text-gray-800">${escapeHtml(t.titulo)}</td>
+          <td class="px-3 py-2.5 text-xs text-gray-500">${vinculo}</td>
+          <td class="px-3 py-2.5 text-xs">${formatoMoneda(peso)} <span class="text-gray-400">(${pctPeso.toFixed(1)}% del total)</span></td>
+          <td class="px-3 py-2.5 text-xs text-gray-500">${t.fecha_inicio ? formatoFecha(t.fecha_inicio) : "—"} → ${t.fecha_fin ? formatoFecha(t.fecha_fin) : "—"}</td>
+          <td class="px-3 py-2.5">
+            <select class="select-estado-tarea rounded-lg border-gray-300 text-xs" data-id="${t.id}">
+              ${Object.entries(ESTADOS_TAREA)
+                .map(([val, label]) => `<option value="${val}" ${val === t.estado ? "selected" : ""}>${label}</option>`)
+                .join("")}
+            </select>
+          </td>
+          <td class="px-3 py-2.5">
+            <div class="flex items-center gap-2">
+              <input type="number" min="0" max="100" step="5" class="input-avance-tarea w-16 rounded-lg border-gray-300 text-xs" value="${t.avance_pct ?? 0}" data-id="${t.id}" />
+              <div class="barra-progreso w-14"><span style="width:${t.avance_pct ?? 0}%"></span></div>
+            </div>
+          </td>
+          <td class="px-3 py-2.5 text-right">
+            <button class="btn-borrar-tarea-lista text-gray-400 hover:text-red-600" data-id="${t.id}">
+              <span class="material-symbols-outlined text-[18px]">delete</span>
+            </button>
+          </td>
+        </tr>`;
+      })
+      .join("");
+
+    cont.querySelectorAll(".input-avance-tarea").forEach(conectarInputAvance);
+    cont.querySelectorAll(".select-estado-tarea").forEach((sel) =>
+      sel.addEventListener("change", async () => {
+        const cambios = { estado: sel.value };
+        if (sel.value === "hecho") cambios.avance_pct = 100;
+        const ok = await actualizarTarea(sel.dataset.id, cambios);
+        if (ok) {
+          mostrarAviso("Tarea actualizada", "exito");
+          cargarTareas();
+          refrescarAvanceProyecto();
+        }
+      })
+    );
+    cont.querySelectorAll(".btn-borrar-tarea-lista").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        if (!confirm("¿Borrar esta tarea?")) return;
+        const { error } = await window.sb.from("tareas").delete().eq("id", btn.dataset.id);
+        if (error) return manejarError(error, "No se pudo borrar la tarea");
+        cargarTareas();
+        refrescarAvanceProyecto();
+      })
+    );
   }
 
   function renderGantt() {
@@ -1543,19 +1998,29 @@
       .map((t) => {
         const left = diasDesde(t.fecha_inicio) * GANTT_PX_POR_DIA;
         const width = Math.max(GANTT_PX_POR_DIA, (diasDesde(t.fecha_fin) - diasDesde(t.fecha_inicio) + 1) * GANTT_PX_POR_DIA);
+        const pct = Math.max(0, Math.min(100, Number(t.avance_pct || 0)));
         return `
         <div class="relative flex h-10 items-center border-t border-gray-50">
-          <div class="sticky left-0 z-10 w-[190px] shrink-0 truncate bg-white pr-2 text-xs font-medium text-gray-700">${escapeHtml(t.titulo)}</div>
+          <div class="sticky left-0 z-10 w-[190px] shrink-0 truncate bg-white pr-2 text-xs font-medium text-gray-700" title="${escapeHtml(t.titulo)}">${escapeHtml(t.titulo)}</div>
           <div class="relative h-full flex-1" style="min-width:${anchoTimeline}px">
-            <div class="gantt-barra absolute flex items-center overflow-hidden rounded-md px-2 text-[11px] font-medium text-white ${colorEstado[t.estado] || "bg-gray-400"}"
+            <div class="gantt-barra absolute overflow-hidden rounded-md border border-gray-200 bg-gray-100"
               style="top:5px; left:${left}px; width:${width}px; height:30px;" data-tarea-id="${t.id}">
-              <span class="truncate">${escapeHtml(t.titulo)}</span>
+              <div class="absolute inset-y-0 left-0 ${colorEstado[t.estado] || "bg-gray-400"}" style="width:${pct}%"></div>
               <div class="gantt-resize absolute right-0 top-0 h-full w-2 cursor-ew-resize bg-black/10"></div>
             </div>
+            <span class="pointer-events-none absolute text-[10px] font-semibold text-gray-500" style="top:9px; left:${left + width + 6}px">${pct}%</span>
           </div>
         </div>`;
       })
       .join("");
+
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    const diasHoy = diasDesde(hoy.toISOString().slice(0, 10));
+    const lineaHoyHtml =
+      diasHoy >= 0 && diasHoy <= totalDias
+        ? `<div class="absolute top-0 z-10 h-full border-l-2 border-red-400" style="left:${190 + diasHoy * GANTT_PX_POR_DIA}px" title="Hoy"></div>`
+        : "";
 
     cont.style.minWidth = `${anchoTimeline + 190}px`;
     cont.innerHTML = `
@@ -1563,7 +2028,10 @@
         <div class="sticky left-0 z-10 w-[190px] shrink-0 bg-white"></div>
         <div class="relative h-6 flex-1" style="min-width:${anchoTimeline}px">${reglaHtml}</div>
       </div>
-      ${filasHtml}`;
+      <div class="relative">
+        ${lineaHoyHtml}
+        ${filasHtml}
+      </div>`;
 
     document.querySelectorAll(".gantt-barra").forEach((barra) => {
       const resizeHandle = barra.querySelector(".gantt-resize");
@@ -1630,31 +2098,35 @@
     }
   });
 
+  const VISTAS_TAREA = ["lista", "kanban", "gantt"];
   function actualizarBotonesVistaTarea(vista) {
-    const kanbanBtn = document.getElementById("btn-vista-kanban");
-    const ganttBtn = document.getElementById("btn-vista-gantt");
-    kanbanBtn.classList.toggle("bg-white", vista === "kanban");
-    kanbanBtn.classList.toggle("shadow-sm", vista === "kanban");
-    kanbanBtn.classList.toggle("text-gray-800", vista === "kanban");
-    ganttBtn.classList.toggle("bg-white", vista === "gantt");
-    ganttBtn.classList.toggle("shadow-sm", vista === "gantt");
-    ganttBtn.classList.toggle("text-gray-800", vista === "gantt");
+    VISTAS_TAREA.forEach((v) => {
+      const btn = document.getElementById(`btn-vista-${v}`);
+      if (!btn) return;
+      const activo = v === vista;
+      btn.classList.toggle("bg-white", activo);
+      btn.classList.toggle("shadow-sm", activo);
+      btn.classList.toggle("text-gray-800", activo);
+    });
   }
-  document.getElementById("btn-vista-kanban").addEventListener("click", () => {
-    document.getElementById("vista-kanban").classList.remove("hidden");
-    document.getElementById("vista-gantt").classList.add("hidden");
-    actualizarBotonesVistaTarea("kanban");
+  function mostrarVistaTarea(vista) {
+    VISTAS_TAREA.forEach((v) => {
+      const panel = document.getElementById(`vista-${v}`);
+      if (panel) panel.classList.toggle("hidden", v !== vista);
+    });
+    actualizarBotonesVistaTarea(vista);
+  }
+  VISTAS_TAREA.forEach((v) => {
+    document.getElementById(`btn-vista-${v}`)?.addEventListener("click", () => mostrarVistaTarea(v));
   });
-  document.getElementById("btn-vista-gantt").addEventListener("click", () => {
-    document.getElementById("vista-kanban").classList.add("hidden");
-    document.getElementById("vista-gantt").classList.remove("hidden");
-    actualizarBotonesVistaTarea("gantt");
-  });
-  actualizarBotonesVistaTarea("kanban");
+  mostrarVistaTarea("lista");
 
   function abrirModalTarea() {
     const opcionesCotizacion = cotizacionCache
       .map((ci) => `<option value="${ci.id}">${escapeHtml(ci.descripcion)} (${formatoMoneda(ci.subtotal)})</option>`)
+      .join("");
+    const opcionesPresupuesto = presupuestoCache
+      .map((pi) => `<option value="${pi.id}">${escapeHtml(pi.descripcion)} (${formatoMoneda(pi.valor_total)})</option>`)
       .join("");
     const html = `
       <div id="modal-tarea" class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
@@ -1679,24 +2151,38 @@
                 <input id="t-fin" type="date" class="w-full rounded-lg border-gray-300 text-sm" />
               </div>
             </div>
+            <p class="text-xs text-gray-400">El peso de la tarea en el avance ponderado del proyecto es el valor del renglón que vincules aquí (elige solo uno). Si no vinculas ninguno, se usa el peso manual.</p>
             <div>
-              <label class="mb-1 block text-xs font-medium text-gray-700">Renglón de la cotización (define su peso en el % de avance)</label>
+              <label class="mb-1 block text-xs font-medium text-gray-700">Renglón de la cotización (peso = valor de venta)</label>
               <select id="t-cotizacion-item" class="w-full rounded-lg border-gray-300 text-sm">
-                <option value="">— Ninguno (usar peso manual) —</option>
+                <option value="">— Ninguno —</option>
                 ${opcionesCotizacion}
               </select>
             </div>
             <div>
-              <label class="mb-1 block text-xs font-medium text-gray-700">Peso manual (si no eliges renglón)</label>
-              <input id="t-peso-manual" type="number" min="0" step="0.01" value="1" class="w-full rounded-lg border-gray-300 text-sm" />
+              <label class="mb-1 block text-xs font-medium text-gray-700">Renglón del presupuesto (peso = valor de costo)</label>
+              <select id="t-presupuesto-item" class="w-full rounded-lg border-gray-300 text-sm">
+                <option value="">— Ninguno —</option>
+                ${opcionesPresupuesto}
+              </select>
             </div>
             <div>
-              <label class="mb-1 block text-xs font-medium text-gray-700">Estado</label>
-              <select id="t-estado" class="w-full rounded-lg border-gray-300 text-sm">
-                ${Object.entries(ESTADOS_TAREA)
-                  .map(([val, label]) => `<option value="${val}">${label}</option>`)
-                  .join("")}
-              </select>
+              <label class="mb-1 block text-xs font-medium text-gray-700">Peso manual (solo si no vinculas ningún renglón)</label>
+              <input id="t-peso-manual" type="number" min="0" step="0.01" value="1" class="w-full rounded-lg border-gray-300 text-sm" />
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-700">Estado</label>
+                <select id="t-estado" class="w-full rounded-lg border-gray-300 text-sm">
+                  ${Object.entries(ESTADOS_TAREA)
+                    .map(([val, label]) => `<option value="${val}">${label}</option>`)
+                    .join("")}
+                </select>
+              </div>
+              <div>
+                <label class="mb-1 block text-xs font-medium text-gray-700">% Avance inicial</label>
+                <input id="t-avance-pct" type="number" min="0" max="100" step="5" value="0" class="w-full rounded-lg border-gray-300 text-sm" />
+              </div>
             </div>
           </div>
           <div class="mt-5 flex justify-end gap-2">
@@ -1708,6 +2194,27 @@
     document.body.insertAdjacentHTML("beforeend", html);
     const cerrar = () => document.getElementById("modal-tarea").remove();
     document.getElementById("t-cancelar").addEventListener("click", cerrar);
+
+    // Vincular a un renglón de cotización o de presupuesto es mutuamente
+    // excluyente (el peso solo puede venir de uno de los dos): al elegir uno
+    // se limpia y deshabilita el otro.
+    const selCotizacion = document.getElementById("t-cotizacion-item");
+    const selPresupuesto = document.getElementById("t-presupuesto-item");
+    selCotizacion.addEventListener("change", () => {
+      selPresupuesto.disabled = !!selCotizacion.value;
+      if (selCotizacion.value) selPresupuesto.value = "";
+    });
+    selPresupuesto.addEventListener("change", () => {
+      selCotizacion.disabled = !!selPresupuesto.value;
+      if (selPresupuesto.value) selCotizacion.value = "";
+    });
+
+    const selEstado = document.getElementById("t-estado");
+    const inputAvancePct = document.getElementById("t-avance-pct");
+    selEstado.addEventListener("change", () => {
+      if (selEstado.value === "hecho") inputAvancePct.value = 100;
+    });
+
     document.getElementById("t-guardar").addEventListener("click", async () => {
       const titulo = document.getElementById("t-titulo").value.trim();
       if (!titulo) return mostrarAviso("El título es obligatorio", "error");
@@ -1717,9 +2224,11 @@
         descripcion: document.getElementById("t-descripcion").value.trim() || null,
         fecha_inicio: document.getElementById("t-inicio").value || null,
         fecha_fin: document.getElementById("t-fin").value || null,
-        cotizacion_item_id: document.getElementById("t-cotizacion-item").value || null,
+        cotizacion_item_id: selCotizacion.value || null,
+        presupuesto_item_id: selPresupuesto.value || null,
         peso_manual: Number(document.getElementById("t-peso-manual").value || 1),
-        estado: document.getElementById("t-estado").value,
+        estado: selEstado.value,
+        avance_pct: Math.max(0, Math.min(100, Number(inputAvancePct.value || 0))),
         orden: tareasCache.length,
       };
       const { error } = await window.sb.from("tareas").insert(payload);
@@ -1727,7 +2236,7 @@
       cerrar();
       mostrarAviso("Tarea creada", "exito");
       cargarTareas();
-      cargarProyecto();
+      refrescarAvanceProyecto();
     });
   }
   document.getElementById("btn-nueva-tarea").addEventListener("click", () => abrirModalTarea());

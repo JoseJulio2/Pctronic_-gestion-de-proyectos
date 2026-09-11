@@ -1,5 +1,14 @@
 (async () => {
-  const { session } = await window.pctronicReady;
+  const { session, profile } = await window.pctronicReady;
+
+  // Crear proyectos es una acción exclusiva del administrador. La base de
+  // datos también lo exige (política RLS), pero validamos aquí primero para
+  // no dejar a un usuario normal viendo un formulario que no podrá guardar.
+  if (profile?.rol !== "admin") {
+    mostrarAviso("Solo un administrador puede crear proyectos nuevos.", "error");
+    window.location.href = "proyectos.html";
+    return;
+  }
 
   const TIPOS_PROYECTO = ["CCTV", "Control de Acceso", "Alarmas", "Cableado Estructurado", "Domótica", "Mantenimiento", "Otro"];
   const CATEGORIAS_COSTO = { MP: "Materiales", EQUIPO: "Equipos", ALQUILER: "Alquileres", OTRO: "Otro" };

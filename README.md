@@ -21,10 +21,13 @@ explicado todo, sin dar por hecho que sabes de programación.
 │                                ejecutor e impuestos (IVA/AIU) y (2) Cotización, Presupuesto de
 │                                Materiales/Equipos/Alquileres, Presupuesto de Mano de Obra y
 │                                Documentos — manual o importando plantilla Excel
-├── proyecto-detalle.html     → detalle de un proyecto: Resumen, Cotización, Presupuesto,
-│                                Ejecución (Tareas estilo Asana: Kanban + Gantt), Cortes (Obra
-│                                desde la Cotización + Contratista desde la Mano de Obra, con
-│                                PDF de Acta), Facturación, Compras, Documentos
+├── proyecto-detalle.html     → detalle de un proyecto: Resumen, Cotización, Presupuesto
+│                                (filtro por categoría o General), Cronograma de Ejecución
+│                                (Vista/Kanban/Gantt con avance ponderado por peso financiero),
+│                                Cortes (subpestañas Cliente y Mano de Obra, cada una con su
+│                                propia Acta en PDF y, en Cliente, adjuntos de facturas/soportes),
+│                                Facturación, Compras (con N° de factura, adjunto y vínculo a un
+│                                renglón del presupuesto), Documentos
 ├── facturacion.html          → vista global de facturas (filtro por mes, exportar Excel/PDF)
 ├── compras.html               → vista global de compras/costos (filtro por mes, exportar Excel/PDF)
 ├── suministros.html           → ventas de equipos/insumos sin instalación
@@ -51,23 +54,35 @@ de Supabase. Todo lo demás ya está listo.
   y escribir la información (pensado para un equipo interno de confianza). Si
   más adelante quieres restringir por rol a nivel de base de datos, se puede
   ajustar el archivo `sql/schema.sql`.
+- Excepción ya aplicada: **crear un proyecto nuevo es una acción exclusiva del
+  administrador** — el botón "Nuevo Proyecto" solo aparece para admins, y la
+  base de datos también lo exige con una política de seguridad (aunque alguien
+  intente saltarse la pantalla, Supabase rechaza el insert si su usuario no
+  tiene rol `admin` en `profiles`).
 
 ## Alcance de esta versión
 
-Incluye: creación de Proyectos en un asistente de 2 pasos que registra
-Cotización (renglonado de venta que define el valor del contrato), Presupuesto
-de Materiales/Equipos/Alquileres, Presupuesto de Mano de Obra y Documentos
-base — todo manual o importando la plantilla Excel de cada lista. Proyectos
-(empresa propia, N° de contrato, ejecutor personal propio/contratista,
-contrato IVA o AIU con IVA sobre la Utilidad, margen bruto y % de presupuesto
-gastado), Ejecución con Tareas estilo Asana (Kanban + Gantt) que calculan el %
-de avance automáticamente ponderando por el valor de la Cotización, Cortes de
-Obra (contra la Cotización, alimenta la factura al cliente) y de Contratista
-(contra el Presupuesto de Mano de Obra) con generación de Acta en PDF,
-Documentos por proyecto, Facturación, Compras y Costos, Suministros, Empresas
-propias (con logo), y los catálogos de Clientes, Contratistas y Proveedores
-con contactos múltiples. El Panel Principal es personalizable e incluye un
-Modo Comité de Gerencia para la reunión semanal de proyectos.
+Incluye: creación de Proyectos (solo administradores) en un asistente de 2
+pasos que registra Cotización (renglonado de venta que define el valor del
+contrato), Presupuesto de Materiales/Equipos/Alquileres, Presupuesto de Mano
+de Obra y Documentos base — todo manual o importando la plantilla Excel de
+cada lista. Proyectos (empresa propia, N° de contrato, ejecutor personal
+propio/contratista, contrato IVA o AIU con IVA sobre la Utilidad, margen bruto
+y % de presupuesto gastado por categoría o en General), un Cronograma de
+Ejecución con tres vistas (Vista de lista tipo curva S, Kanban y Gantt con
+relleno de % avance) que calcula el % de avance del proyecto ponderando cada
+tarea por su peso financiero (renglón de Cotización o de Presupuesto
+vinculado) y su propio % de avance — no solo "hecha o no hecha" — igual que
+una curva S de obra, Cortes separados en dos subpestañas (Cliente: avances,
+factura y Acta en PDF con desglose de AIU en valores, datos de la empresa y
+adjuntos de facturas/soportes del cliente; Mano de Obra: contratistas, avances
+por corte, generación de pagos y su propia Acta), Documentos por proyecto,
+Facturación, Compras y Costos (con N° de factura, adjunto de la factura y
+vínculo opcional a un renglón del presupuesto para ver el gasto real ítem por
+ítem), Suministros, Empresas propias (con logo, NIT y dirección), y los
+catálogos de Clientes, Contratistas y Proveedores con contactos múltiples. El
+Panel Principal es personalizable e incluye un Modo Comité de Gerencia para la
+reunión semanal de proyectos.
 
 **Servicios y Mantenimientos** (contratos periódicos, informes
 preventivo→oferta→correctivo y el sistema de tickets) queda para una

@@ -36,9 +36,11 @@ function _acumuladoHastaPdf(itemId, itemTipo, corte, todosLosCortes) {
 
 // options: { proyecto, corte, todosLosCortes, items (normalizados: id, descripcion,
 // unidad, cantidad, valor_unitario, valor_total), itemTipo: 'cotizacion'|'mano_obra',
-// valorContratoTotal, variante: 'cliente'|'contratista', contratistaId, contratistasCache }
+// valorContratoTotal, variante: 'cliente'|'contratista', contratistaId,
+// contratistasCache, documentosAdjuntos (solo variante 'cliente': facturas/soportes
+// subidos para este corte, se listan al final del acta) }
 async function generarActaCortePDF(options) {
-  const { proyecto, corte, todosLosCortes, items, itemTipo, valorContratoTotal, variante, contratistaId, contratistasCache } = options;
+  const { proyecto, corte, todosLosCortes, items, itemTipo, valorContratoTotal, variante, contratistaId, contratistasCache, documentosAdjuntos } = options;
 
   if (!window.jspdf || !window.jspdf.jsPDF) {
     return mostrarAviso("No se pudo cargar el generador de PDF (revisa tu conexión)", "error");
@@ -49,8 +51,9 @@ async function generarActaCortePDF(options) {
   const margenIzq = 40;
   let y = 40;
 
-  const empresaNombre = proyecto.empresas?.nombre || "Pctronic Seguridad Electrónica";
-  const logoUrl = proyecto.empresas?.logo_url;
+  const empresa = proyecto.empresas || {};
+  const empresaNombre = empresa.nombre || "Pctronic Seguridad Electrónica";
+  const logoUrl = empresa.logo_url;
   if (logoUrl) {
     const dataUrl = await imagenABase64(logoUrl);
     if (dataUrl) {
@@ -62,15 +65,30 @@ async function generarActaCortePDF(options) {
     }
   }
 
+  // Datos de nuestra empresa (NIT, dirección, teléfono, correo) — solo se
+  // imprimen los que existan, separados por " · ".
+  const datosEmpresa = [
+    empresa.nit ? `NIT ${empresa.nit}` : null,
+    empresa.direccion || null,
+    empresa.telefono ? `Tel. ${empresa.telefono}` : null,
+    empresa.email || null,
+  ]
+    .filter(Boolean)
+    .join("  ·  ");
+
   doc.setFontSize(13);
   doc.setFont(undefined, "bold");
   doc.text(empresaNombre, margenIzq + 65, y + 14);
-  doc.setFontSize(9);
+  doc.setFontSize(8);
   doc.setFont(undefined, "normal");
-  doc.text(`Proyecto: ${proyecto.nombre}`, margenIzq + 65, y + 30);
-  doc.text(`Cliente: ${proyecto.clientes?.nombre || "—"}`, margenIzq + 65, y + 44);
+  doc.setTextColor(100);
+  if (datosEmpresa) doc.text(datosEmpresa, margenIzq + 65, y + 27);
+  doc.setTextColor(0);
+  doc.setFontSize(9);
+  doc.text(`Proyecto: ${proyecto.nombre}`, margenIzq + 65, y + (datosEmpresa ? 41 : 30));
+  doc.text(`Cliente: ${proyecto.clientes?.nombre || "—"}`, margenIzq + 65, y + (datosEmpresa ? 55 : 44));
 
-  y += 75;
+  y += 85;
 
   const titulo =
     variante === "contratista"
@@ -176,8 +194,44 @@ async function generarActaCortePDF(options) {
   } else {
     doc.text(`IVA: ${proyecto.iva_porcentaje}%`, margenIzq, y);
   }
+  y += 10;
 
-  y += 60;
+  // Desglose del AIU en valores (no solo %), justo debajo de las condiciones
+  // tributarias — solo aplica al Acta de Cliente de un contrato tipo AIU.
+  if (variante === "cliente" && proyecto.tipo_contrato === "aiu") {
+    const base = Number(proyecto.valor_antes_impuestos || 0);
+    const valorAdmin = base * (Number(proyecto.administracion_porcentaje || 0) / 100);
+    const valorImprev = base * (Number(proyecto.imprevistos_porcentaje || 0) / 100);
+    const valorUtil = base * (Number(proyecto.utilidad_porcentaje || 0) / 100);
+    const valorIvaUtil = valorUtil * (Number(proyecto.iva_porcentaje || 0) / 100);
+
+    y += 6;
+    if (y > 680) {
+      doc.addPage();
+      y = 60;
+    }
+    doc.autoTable({
+      startY: y,
+      margin: { left: margenIzq, right: margenIzq },
+      theme: "plain",
+      styles: { fontSize: 8, cellPadding: 2 },
+      head: [["AIU (valores)", "Administración", "Imprevistos", "Utilidad", "IVA sobre Utilidad", "Total AIU + IVA"]],
+      headStyles: { fontStyle: "bold", textColor: [90, 90, 90] },
+      body: [
+        [
+          "Valor Contrato Base " + formatoMoneda(base),
+          formatoMoneda(valorAdmin),
+          formatoMoneda(valorImprev),
+          formatoMoneda(valorUtil),
+          formatoMoneda(valorIvaUtil),
+          formatoMoneda(valorAdmin + valorImprev + valorUtil + valorIvaUtil),
+        ],
+      ],
+    });
+    y = doc.lastAutoTable.finalY + 10;
+  }
+
+  y += 30;
   if (y > 680) {
     doc.addPage();
     y = 80;
@@ -189,6 +243,31 @@ async function generarActaCortePDF(options) {
   doc.setFontSize(9);
   doc.text(variante === "contratista" ? "Firma Contratista" : "Recibido / Aprobado por el Cliente", margenIzq, y + 14);
   doc.text(`Elaborado por ${empresaNombre}`, margenIzq + 260, y + 14);
+
+  // Lista de facturas/soportes del cliente adjuntos a este corte (si los hay),
+  // como enlaces clicables al final del acta.
+  if (variante === "cliente" && documentosAdjuntos && documentosAdjuntos.length) {
+    y += 34;
+    if (y > 700) {
+      doc.addPage();
+      y = 60;
+    }
+    doc.setFont(undefined, "bold");
+    doc.setFontSize(9);
+    doc.text("Facturas y soportes adjuntos", margenIzq, y);
+    doc.setFont(undefined, "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(19, 91, 236);
+    documentosAdjuntos.forEach((docAdjunto, i) => {
+      y += 13;
+      if (y > 730) {
+        doc.addPage();
+        y = 60;
+      }
+      doc.textWithLink(`• ${docAdjunto.nombre_archivo}`, margenIzq, y, { url: docAdjunto.url });
+    });
+    doc.setTextColor(0);
+  }
 
   const nombreArchivo = `Acta_Corte_${corte.numero_corte}_${variante}_${(proyecto.nombre || "proyecto").replace(/[^a-z0-9]+/gi, "_")}.pdf`;
   doc.save(nombreArchivo);
