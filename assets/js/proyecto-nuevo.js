@@ -147,13 +147,15 @@
     btn.disabled = true;
     btn.textContent = "Creando...";
 
+    let proyecto = null;
     try {
-      const { data: proyecto, error } = await window.sb
+      const { data, error } = await window.sb
         .from("proyectos")
         .insert({ ...payload, created_by: session.user.id })
         .select()
         .single();
       if (error) throw error;
+      proyecto = data;
 
       const tarifas = importado.tarifas.length ? importado.tarifas : PCT.TARIFAS_EJEMPLO;
       const { error: errTarifas } = await window.sb
@@ -166,6 +168,9 @@
       mostrarAviso("Proyecto creado.", "exito");
       window.location.href = `proyecto-detalle.html?id=${proyecto.id}&tab=cotizacion`;
     } catch (err) {
+      // Si falló después de crear el proyecto, se borra para no dejar copias
+      // incompletas (sus tarifas e ítems se borran con él).
+      if (proyecto) await window.sb.from("proyectos").delete().eq("id", proyecto.id);
       manejarError(err, "No se pudo crear el proyecto");
       btn.disabled = false;
       btn.textContent = "Crear proyecto";
