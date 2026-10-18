@@ -24,7 +24,9 @@ siempre qué debe hacer él después (subir a GitHub, correr SQL en Supabase, et
   `assets/js/proy/*.js`, todos colgados de `window.PCT`:
   `core.js` (estado, carga, cálculos, modal) · `importar.js` (Excel: cotización de Pctronic y plantilla v7,
   + plantilla de cotización descargable) · `inicio.js` (datos y parámetros) · `presupuesto.js` (pestañas
-  **Cotización** y **Presupuesto de costos**) · `avance.js` (avance diario) · `documentos.js`.
+  **Cotización** y **Presupuesto de costos**) · `avance.js` (avance diario) · `cortes.js` (Cortes cliente +
+  `PCT.editorCorte` y `PCT.pdfActa`, compartidos) · `manoobra.js` (contrato y cortes del contratista, pagos,
+  técnicos propios) · `documentos.js`.
   Cada pestaña se redibuja al abrirse.
 - **Nombres**: en pantalla se dice **Cotización** (precios al cliente) y **Presupuesto de costos** (costos
   internos). Nunca "Presupuesto" a secas para lo que paga el cliente. En la BD sigue siendo una sola tabla
@@ -79,9 +81,19 @@ siempre qué debe hacer él después (subir a GitHub, correr SQL en Supabase, et
   `ejecutor = 'contratista'`, esté pagado o no. Cortes ilimitados.
 - Acta cliente: CD del corte → A, I, U, IVA sobre U → total → amortización del anticipo → neto a facturar.
 - **Margen bruto actual** (encabezado del proyecto, al lado del avance real) = facturado − gastado.
-  Facturado = ingreso sin IVA de TODOS los cortes de cliente (Σ cantidad × `pu_venta_snapshot`, con A+I+U si
-  es AIU); gastado = Σ `gastos.valor_total`. `PCT.recargarFinanzas` + `PCT.margenActual`. Queda en $0 hasta
-  que existan las pestañas Cortes (Fase 2) y Gastos (Fase 3).
+  Facturado = ingreso sin IVA de los cortes de cliente en estado **facturado o pagado** (Σ cantidad ×
+  `pu_venta_snapshot`, con A+I+U si es AIU; un corte "pendiente" no cuenta); gastado = Σ `gastos.valor_total`.
+  `PCT.recargarFinanzas` + `PCT.margenActual`.
+- **Cortes** (cliente y contratista): `PCT.editorCorte` propone por ítem lo ejecutado en el Avance diario y
+  no cortado (`v_item_ejecucion`); el usuario ajusta (puede cortar más que lo pendiente). El precio queda
+  congelado en el corte (`pu_venta_snapshot` / `pu_contratista_snapshot`). Solo se puede eliminar el último
+  corte. Soportes del corte cliente = `documentos` con `corte_id` (salen listados en el acta PDF).
+- **Mano de obra**: PU MO presupuesto (`cu_mano_obra`) y PU contratista (`pu_contratista`) se editan en la
+  pestaña Mano de obra (ya no en Presupuesto de costos); ahorro solo en ítems con PU contratista. El corte del
+  contratista guarda `contratista_id` y `retencion_porcentaje` (snapshot). **Pagos al contratista = filas en
+  `gastos`** (tipo 'Mano de obra contratista', `corte_mo_id`) por el valor BRUTO (costo real); el neto girado
+  y la retención quedan en `observaciones`. Saldo del corte = bruto − pagado. Técnicos propios
+  (`registro_mo_propia`): valor = valor_hora × (días × horas_día + extra × (1 + recargo)); no van a Gastos.
 - **Avance diario** (Jose, oct. 2026): bitácora = un solo comentario por día (`avance_registros.observaciones`;
   el clima ya no se usa y las novedades viejas se muestran unidas al comentario). Tabla "Avance por ítem" con
   TODOS los ítems: este día, acumulado y % editables; cualquier cambio se guarda como la cantidad del día
@@ -117,17 +129,20 @@ Cotización (ítems con referencia, marca, tiempo de entrega, observaciones; adi
 Presupuesto de costos (solo material, margen verde/rojo, exportar/importar en la plantilla de cotización),
 Avance diario (con bitácora diaria: tabla `avance_registros`), Documentos, Resumen.
 
+Hecho (Fase 2, oct. 2026): **Cortes cliente** (acta con AIU y anticipo, factura/estado/recaudo, soportes, PDF)
+y **Mano de obra** (contrato del contratista, cortes con retención y PDF, pagos que crean gastos, técnicos
+propios). Migración: `sql/migracion_2026-10_fase2.sql`. `assets/js/pdf.js` es heredado (solo se usa su
+`imagenABase64` para el logo).
+
 Pendiente, en este orden:
 
-1. **Fase 2 — Cortes cliente** (+ Acta PDF con AIU, datos de la empresa y adjuntos; reutilizar `assets/js/pdf.js`).
-2. **Fase 3 — Mano de obra** (cortes del contratista, PU contratista vs presupuesto, horas de técnicos propios)
-   y **Gastos** (tabla `gastos`, factura adjunta, pago de cortes del contratista).
+2. **Fase 3 — Gastos** (tabla `gastos`, factura adjunta; los pagos al contratista ya entran ahí desde Mano de obra).
 3. **Fase 4 — Materiales** (faltante, precio promedio, alertas), **Cronograma** (fases, hitos, predecesoras,
    Gantt, % desde avance diario) y **Tablero** (margen, avance real vs cobrado vs planeado, alertas).
 4. **Fase 5** — migrar el Panel Principal, `compras.html` y `facturacion.html` a las tablas nuevas
    (hoy leen tablas heredadas: `compras`, `facturas`, `proyecto_contratistas`/`cortes_pago`).
 
-Pendientes sueltos: las pestañas Cortes/Mano de obra/Gastos/Materiales/Cronograma aparecen como "Próximamente".
+Pendientes sueltos: las pestañas Gastos/Materiales/Cronograma aparecen como "Próximamente".
 
 ## Cómo trabajar con Jose
 
