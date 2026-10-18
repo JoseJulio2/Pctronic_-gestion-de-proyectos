@@ -60,19 +60,21 @@
             ${p.empresas?.nombre ? "· " + escapeHtml(p.empresas.nombre) : ""}
           </p>
         </div>
-        <div class="flex items-center gap-6">
-          <div class="w-40">
-            <div class="flex items-baseline justify-between text-xs text-gray-500"><span>Avance físico real</span><b class="text-sm text-gray-900">${PCT.fmtPct(av.pct)}</b></div>
-            <div class="barra-progreso mt-1"><span style="width:${Math.round(av.pct * 100)}%"></span></div>
+        <div class="grid w-full grid-cols-1 divide-y divide-gray-100 rounded-lg border border-gray-100 bg-gray-50/60 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+          <div class="px-4 py-3">
+            <p class="text-[11px] font-semibold uppercase text-gray-500">Avance físico real</p>
+            <p class="mt-0.5 text-lg font-bold tabular-nums text-gray-900">${PCT.fmtPct(av.pct)}</p>
+            <div class="barra-progreso mt-1.5"><span style="width:${Math.round(av.pct * 100)}%"></span></div>
           </div>
-          <div class="text-right" title="Facturado (cortes de cliente, sin IVA) ${formatoMoneda(mg.facturado)} − gastado ${formatoMoneda(mg.gastado)}">
-            <p class="text-xs text-gray-500">Margen bruto actual</p>
-            <p class="text-lg font-bold tabular-nums ${colorMg}">${formatoMoneda(mg.margen)}${mg.pct !== null ? ` <span class="text-xs font-semibold">(${PCT.fmtPct(mg.pct)})</span>` : ""}</p>
-            <p class="text-[11px] text-gray-400">Facturado ${formatoMoneda(mg.facturado)} · Gastado ${formatoMoneda(mg.gastado)}</p>
+          <div class="px-4 py-3" title="Facturado (cortes de cliente, sin IVA) menos gastado (Gastos)">
+            <p class="text-[11px] font-semibold uppercase text-gray-500">Margen bruto actual</p>
+            <p class="mt-0.5 text-lg font-bold tabular-nums ${colorMg}">${formatoMoneda(mg.margen)}${mg.pct !== null ? ` <span class="text-xs font-semibold">${PCT.fmtPct(mg.pct)}</span>` : ""}</p>
+            <p class="mt-0.5 truncate text-[11px] text-gray-400">Facturado ${formatoMoneda(mg.facturado)} · Gastado ${formatoMoneda(mg.gastado)}</p>
           </div>
-          <div class="text-right">
-            <p class="text-xs text-gray-500">Valor del contrato</p>
-            <p class="text-lg font-bold tabular-nums text-gray-900">${formatoMoneda(p.valor_total)}</p>
+          <div class="px-4 py-3">
+            <p class="text-[11px] font-semibold uppercase text-gray-500">Valor del contrato</p>
+            <p class="mt-0.5 text-lg font-bold tabular-nums text-gray-900">${formatoMoneda(p.valor_total)}</p>
+            <p class="mt-0.5 text-[11px] text-gray-400">${p.tipo_contrato === "aiu" ? "Esquema AIU" : "IVA pleno"}</p>
           </div>
         </div>
       </div>`;

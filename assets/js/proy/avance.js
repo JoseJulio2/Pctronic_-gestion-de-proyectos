@@ -56,9 +56,15 @@
     root.innerHTML = `
       <div class="space-y-5">
         <div id="av-kpis" class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5"></div>
-        <div class="grid grid-cols-1 gap-5 xl:grid-cols-5">
-          <div class="space-y-4 xl:col-span-3" id="av-dia"></div>
-          <div class="space-y-4 xl:col-span-2" id="av-lateral"></div>
+        <!-- Las tarjetas de la derecha toman la altura de la de la izquierda
+             (y hacen scroll por dentro) para que no queden huecos -->
+        <div class="grid grid-cols-1 gap-5 lg:grid-cols-3">
+          <div class="lg:col-span-2" id="av-dia"></div>
+          <div class="relative" id="av-dias"></div>
+        </div>
+        <div class="grid grid-cols-1 gap-5 lg:grid-cols-3">
+          <div class="lg:col-span-2" id="av-curva"></div>
+          <div class="relative" id="av-capitulos"></div>
         </div>
         <div id="av-items"></div>
       </div>`;
@@ -178,7 +184,8 @@
       const comentario = [reg?.observaciones, reg?.novedades].filter(Boolean).join("\n\n");
 
       root.querySelector("#av-dia").innerHTML = `
-        <div class="rounded-xl border border-gray-200 bg-white p-5">
+        <div class="flex h-full flex-col rounded-xl border border-gray-200 bg-white p-5">
+          <h3 class="mb-3 text-base font-bold text-gray-900">Bitácora</h3>
           <div class="mb-3 flex flex-wrap items-center gap-2">
             <button id="av-ayer" class="rounded-lg border border-gray-300 p-1.5 text-gray-600 hover:bg-gray-50" title="Día anterior"><span class="material-symbols-outlined text-[18px]">chevron_left</span></button>
             <input id="av-fecha" type="date" value="${fecha}" class="rounded-lg border-gray-300 text-sm" />
@@ -186,8 +193,8 @@
             <button id="av-hoy" class="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">Hoy</button>
             <p class="ml-auto text-sm font-semibold capitalize text-gray-700">${fechaLarga(fecha)}</p>
           </div>
-          <label for="av-comentario" class="mb-1 block text-xs font-medium text-gray-700">Comentarios del día (bitácora)</label>
-          <textarea id="av-comentario" rows="4" placeholder="Qué se hizo hoy, personal en obra, novedades, pendientes con el cliente..." class="${CLASE_INPUT}">${escapeHtml(comentario)}</textarea>
+          <label for="av-comentario" class="mb-1 block text-xs font-medium text-gray-700">Comentarios del día</label>
+          <textarea id="av-comentario" rows="6" placeholder="Qué se hizo hoy, personal en obra, novedades, pendientes con el cliente..." class="${CLASE_INPUT} min-h-[140px] flex-1 resize-none">${escapeHtml(comentario)}</textarea>
           <div class="mt-2 flex items-center justify-between gap-3">
             <span class="text-xs text-gray-400">${reg && comentario ? "Este día ya tiene comentario." : "Sin comentario este día."}</span>
             <button id="av-guardar-bitacora" class="rounded-lg border border-primary px-4 py-1.5 text-xs font-semibold text-primary hover:bg-blue-50">Guardar comentario</button>
@@ -465,19 +472,24 @@
             .join("")
         : `<tr><td colspan="3" class="py-4 text-center text-sm text-gray-400">Sin días registrados.</td></tr>`;
 
-      root.querySelector("#av-lateral").innerHTML = `
-        <div class="rounded-xl border border-gray-200 bg-white p-5">
-          <h3 class="mb-2 text-base font-bold text-gray-900">Curva de avance real</h3>
-          ${svgCurva(curvaAcumulada())}
-        </div>
-        <div class="rounded-xl border border-gray-200 bg-white p-5">
-          <h3 class="mb-1 text-base font-bold text-gray-900">Avance por capítulo</h3>
-          ${filasCap}
-        </div>
-        <div class="rounded-xl border border-gray-200 bg-white p-5">
-          <h3 class="mb-2 text-base font-bold text-gray-900">Días registrados</h3>
-          <div class="max-h-72 overflow-y-auto"><table class="w-full"><tbody id="av-historial">${filasHist}</tbody></table></div>
+      // tarjeta lateral: en pantalla grande ocupa justo la altura de la fila
+      const lateral = (titulo, cuerpo, sub = "") => `
+        <div class="flex max-h-80 flex-col rounded-xl border border-gray-200 bg-white p-5 lg:absolute lg:inset-0 lg:max-h-none">
+          <div class="mb-2 flex items-baseline justify-between gap-2"><h3 class="text-base font-bold text-gray-900">${titulo}</h3>${sub}</div>
+          <div class="min-h-0 flex-1 overflow-y-auto">${cuerpo}</div>
         </div>`;
+      const pctTotal = PCT.avanceFisico().pct;
+      root.querySelector("#av-curva").innerHTML = `
+        <div class="h-full rounded-xl border border-gray-200 bg-white p-5">
+          <div class="mb-2 flex items-baseline justify-between"><h3 class="text-base font-bold text-gray-900">Curva de avance real</h3><span class="text-sm font-bold tabular-nums text-primary">${PCT.fmtPct(pctTotal)}</span></div>
+          ${svgCurva(curvaAcumulada())}
+        </div>`;
+      root.querySelector("#av-capitulos").innerHTML = lateral("Avance por capítulo", filasCap, `<span class="text-xs text-gray-400">${caps.length} capítulos</span>`);
+      root.querySelector("#av-dias").innerHTML = lateral(
+        "Días registrados",
+        `<table class="w-full"><tbody id="av-historial">${filasHist}</tbody></table>`,
+        `<span class="text-xs text-gray-400">${registros.length} días</span>`
+      );
       root.querySelector("#av-historial").addEventListener("click", (e) => {
         const tr = e.target.closest("tr[data-fecha]");
         if (!tr) return;
@@ -490,7 +502,7 @@
     // ------------------------------------------------------------------
     // Arranque
     // ------------------------------------------------------------------
-    root.querySelector("#av-dia").innerHTML = `<div class="skeleton h-64 rounded-xl"></div>`;
+    root.querySelector("#av-dia").innerHTML = `<div class="skeleton h-72 rounded-xl"></div>`;
     try {
       await cargarAvance();
     } catch (err) {
