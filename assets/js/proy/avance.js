@@ -1,14 +1,17 @@
 // ============================================================================
 // PROYECTOS · pestaña AVANCE DIARIO.
-// Aquí se registra, día a día, lo que realmente se ejecutó en obra: cantidades
-// por ítem de la cotización (incluidos los adicionales), quién lo ejecutó
-// (contratista o personal propio) y la bitácora del día (clima, observaciones,
-// novedades). De este registro sale el AVANCE FÍSICO REAL del proyecto — no
-// depende de cortes, facturas ni pagos — y de él se alimentan los cortes del
-// cliente y del contratista.
+// Aquí se registra, día a día, lo que realmente se ejecutó en obra:
+//   · Bitácora: un comentario por día (qué se hizo, novedades...).
+//   · Avance por ítem: TODOS los ítems de la cotización en una tabla, con lo
+//     ejecutado este día, el acumulado y el % de avance; los tres se pueden
+//     mover a mano. Cada cambio queda registrado como cantidad ejecutada en el
+//     día elegido (avance_items), a nombre del contratista o del personal propio.
+// El peso de cada ítem (su valor / costo directo) se usa por dentro para el
+// AVANCE FÍSICO REAL del proyecto, pero no se muestra aquí (ya se ve en otras
+// pestañas). El avance no depende de cortes, facturas ni pagos, y de él se
+// alimentan los cortes del cliente y del contratista.
 // ============================================================================
 (function (PCT) {
-  const CLIMAS = ["Soleado", "Parcialmente nublado", "Nublado", "Lluvia", "Lluvia fuerte", "Tormenta eléctrica"];
   const CLASE_INPUT = "block w-full rounded-lg border-gray-300 text-sm shadow-sm focus:border-primary focus:ring-primary";
 
   const sumaDias = (iso, n) => {
@@ -25,7 +28,6 @@
     let registros = []; // avance_registros
     let avItems = []; // avance_items de TODO el proyecto
 
-    const etiquetaItem = (i) => `${i.codigo ? i.codigo + " · " : ""}${i.descripcion}${i.es_adicional ? " (ADICIONAL)" : ""}`;
     const soloItems = () => PCT.estado.items.filter((i) => i.tipo === "item");
     const itemPorId = (id) => PCT.estado.items.find((i) => i.id === id);
 
@@ -40,11 +42,12 @@
       avItems = a.data || [];
     };
 
-    // Recarga todo lo que cambia cuando se registra avance
+    // Recarga todo lo que cambia cuando se registra avance (sin redibujar la
+    // bitácora, para no perder un comentario que se esté escribiendo)
     const refrescarTodo = async () => {
       await Promise.all([cargarAvance(), PCT.recargarEjec(), PCT.recargarProyecto()]);
       pintarResumen();
-      pintarDia();
+      pintarTablaAvance();
       pintarLateral();
       PCT.emit("proyecto");
       PCT.emit("ejec");
@@ -57,6 +60,7 @@
           <div class="space-y-4 xl:col-span-3" id="av-dia"></div>
           <div class="space-y-4 xl:col-span-2" id="av-lateral"></div>
         </div>
+        <div id="av-items"></div>
       </div>`;
 
     // ------------------------------------------------------------------
@@ -103,106 +107,151 @@
     };
 
     // ------------------------------------------------------------------
-    // Registro del día
+    // Registro del día: bitácora + tabla de avance por ítem
     // ------------------------------------------------------------------
     const registroDelDia = () => registros.find((r) => r.fecha === fecha) || null;
+    const redondear = (n) => Math.round(n * 100) / 100;
+    let ejecutorElegido = PCT.estado.proyecto.contratista_principal_id ? "contratista" : "propio";
+    let filtro = "";
+
+    // Cantidad registrada este día para un ítem (todas las líneas del día)
+    const delDia = (itemId) => {
+      const reg = registroDelDia();
+      if (!reg) return 0;
+      return avItems.filter((a) => a.registro_id === reg.id && a.presupuesto_item_id === itemId).reduce((s, a) => s + PCT.num(a.cantidad), 0);
+    };
+
+    const filaTabla = (i) => {
+      if (i.tipo !== "item") {
+        const esCap = i.tipo === "capitulo";
+        const pct = esCap ? PCT.avanceDeCapitulo(i.id) : null;
+        return `<tr class="grupo ${esCap ? "bg-blue-100/70 font-bold" : "bg-blue-50/70 font-semibold"}">
+          <td class="px-2 py-1.5 text-xs">${escapeHtml(i.codigo || "")}</td>
+          <td colspan="5" class="px-2 py-1.5 text-xs text-gray-800">${escapeHtml(i.descripcion)}</td>
+          <td class="px-2 py-1.5 text-right text-xs tabular-nums text-gray-600">${pct === null ? "" : PCT.fmtPct(pct, 0)}</td>
+        </tr>`;
+      }
+      const contratada = PCT.num(i.cantidad);
+      const acum = PCT.num(PCT.ejecItem(i.id).cant_ejecutada);
+      const dia = delDia(i.id);
+      const pct = contratada ? acum / contratada : null;
+      const exceso = pct !== null && pct > 1;
+      const texto = `${i.codigo || ""} ${i.descripcion}`.toLowerCase();
+      const celda = "w-full rounded border border-gray-200 bg-white px-1.5 py-1 text-right text-xs tabular-nums focus:border-primary focus:ring-1 focus:ring-primary";
+      return `<tr data-id="${i.id}" data-texto="${escapeHtml(texto)}" class="fila-item border-t border-gray-100 ${i.es_adicional ? "bg-amber-50/60" : ""}">
+        <td class="px-2 py-1 text-xs text-gray-500">${escapeHtml(i.codigo || "")}</td>
+        <td class="min-w-[320px] px-2 py-1 text-xs text-gray-800"><span class="line-clamp-2" title="${escapeHtml(i.descripcion)}">${escapeHtml(i.descripcion)}</span>${i.es_adicional ? ` <span class="rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800">ADICIONAL</span>` : ""}</td>
+        <td class="px-2 py-1 text-xs text-gray-500">${escapeHtml(i.unidad || "")}</td>
+        <td class="px-2 py-1 text-right text-xs tabular-nums text-gray-600">${PCT.fmtCant(contratada)}</td>
+        <td class="w-24 px-1 py-1"><input data-campo="dia" type="number" step="0.01" value="${dia ? redondear(dia) : ""}" placeholder="0" class="${celda}" /></td>
+        <td class="w-24 px-1 py-1"><input data-campo="acum" type="number" step="0.01" min="0" value="${redondear(acum)}" class="${celda}" /></td>
+        <td class="w-36 px-1 py-1">
+          <div class="flex items-center gap-1">
+            <input data-campo="pct" type="number" step="1" min="0" value="${pct === null ? "" : redondear(pct * 100)}" ${contratada ? "" : "disabled"} class="${celda} ${exceso ? "text-amber-700" : ""}" />
+            <span class="text-[10px] text-gray-400">%</span>
+          </div>
+          <div class="barra-progreso mt-1"><span style="width:${Math.round(Math.min(1, pct || 0) * 100)}%"></span></div>
+        </td>
+      </tr>`;
+    };
+
+    const pintarTablaAvance = () => {
+      const tbody = root.querySelector("#av-tabla tbody");
+      if (!tbody) return;
+      const items = PCT.estado.items;
+      tbody.innerHTML = items.length
+        ? items.map(filaTabla).join("")
+        : `<tr><td colspan="7" class="py-8 text-center text-sm text-gray-400">Primero llena la pestaña Cotización.</td></tr>`;
+      aplicarFiltro();
+    };
+
+    const aplicarFiltro = () => {
+      const f = filtro.trim().toLowerCase();
+      root.querySelectorAll("#av-tabla tbody tr").forEach((tr) => {
+        if (tr.classList.contains("grupo")) tr.classList.toggle("hidden", !!f);
+        else if (tr.dataset.texto !== undefined) tr.classList.toggle("hidden", !!f && !tr.dataset.texto.includes(f));
+      });
+    };
 
     const pintarDia = () => {
       const reg = registroDelDia();
-      const delDia = reg ? avItems.filter((a) => a.registro_id === reg.id) : [];
-      const valorDia = delDia.reduce((s, a) => s + PCT.num(a.cantidad) * PCT.num(itemPorId(a.presupuesto_item_id)?.pu_venta), 0);
-      const cd = PCT.avanceFisico().cd;
-
-      const filas = delDia.length
-        ? delDia
-            .map((a) => {
-              const it = itemPorId(a.presupuesto_item_id);
-              const e = PCT.ejecItem(a.presupuesto_item_id);
-              const exceso = it && PCT.num(e.cant_ejecutada) > PCT.num(it.cantidad) && !it.es_adicional;
-              return `
-              <tr data-aid="${a.id}" class="border-t border-gray-100">
-                <td class="py-2 pr-3">
-                  <p class="font-medium text-gray-900">${escapeHtml(it ? etiquetaItem(it) : "(ítem eliminado)")}</p>
-                  <p class="text-[11px] ${exceso ? "text-amber-600" : "text-gray-400"}">
-                    Acumulado ${PCT.fmtCant(e.cant_ejecutada)} de ${PCT.fmtCant(it?.cantidad)} ${escapeHtml(it?.unidad || "")}${exceso ? " · supera lo contratado (mayor cantidad)" : ""}
-                  </p>
-                </td>
-                <td class="py-2 pr-3">
-                  <select data-f="ejecutor" class="rounded-lg border-gray-300 text-xs">
-                    <option value="contratista" ${a.ejecutor === "contratista" ? "selected" : ""}>Contratista</option>
-                    <option value="propio" ${a.ejecutor === "propio" ? "selected" : ""}>Personal propio</option>
-                  </select>
-                </td>
-                <td class="py-2 pr-3"><input data-f="cantidad" type="number" step="0.01" min="0" value="${a.cantidad}" class="w-24 rounded-lg border-gray-300 text-right text-sm tabular-nums" /> <span class="text-xs text-gray-400">${escapeHtml(it?.unidad || "")}</span></td>
-                <td class="py-2 pr-3 tabular-nums text-xs text-gray-600">${formatoMoneda(PCT.num(a.cantidad) * PCT.num(it?.pu_venta))}</td>
-                <td class="py-2 text-right"><button data-borrar class="text-gray-400 hover:text-red-600" title="Quitar"><span class="material-symbols-outlined text-[18px]">delete</span></button></td>
-              </tr>`;
-            })
-            .join("")
-        : `<tr><td colspan="5" class="py-6 text-center text-gray-400">Aún no hay cantidades registradas este día.</td></tr>`;
+      const comentario = [reg?.observaciones, reg?.novedades].filter(Boolean).join("\n\n");
 
       root.querySelector("#av-dia").innerHTML = `
         <div class="rounded-xl border border-gray-200 bg-white p-5">
-          <div class="mb-4 flex flex-wrap items-center gap-2">
+          <div class="mb-3 flex flex-wrap items-center gap-2">
             <button id="av-ayer" class="rounded-lg border border-gray-300 p-1.5 text-gray-600 hover:bg-gray-50" title="Día anterior"><span class="material-symbols-outlined text-[18px]">chevron_left</span></button>
             <input id="av-fecha" type="date" value="${fecha}" class="rounded-lg border-gray-300 text-sm" />
             <button id="av-manana" class="rounded-lg border border-gray-300 p-1.5 text-gray-600 hover:bg-gray-50" title="Día siguiente"><span class="material-symbols-outlined text-[18px]">chevron_right</span></button>
             <button id="av-hoy" class="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">Hoy</button>
             <p class="ml-auto text-sm font-semibold capitalize text-gray-700">${fechaLarga(fecha)}</p>
           </div>
-
-          <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div>
-              <label class="mb-1 block text-xs font-medium text-gray-700">Clima</label>
-              <input id="av-clima" list="av-climas" value="${escapeHtml(reg?.clima || "")}" placeholder="Ej. Soleado" class="${CLASE_INPUT}" />
-              <datalist id="av-climas">${CLIMAS.map((c) => `<option value="${c}"></option>`).join("")}</datalist>
-            </div>
-            <div class="sm:col-span-2">
-              <label class="mb-1 block text-xs font-medium text-gray-700">Observaciones del día</label>
-              <input id="av-obs" value="${escapeHtml(reg?.observaciones || "")}" placeholder="Qué se hizo, personal presente, etc." class="${CLASE_INPUT}" />
-            </div>
-            <div class="sm:col-span-3">
-              <label class="mb-1 block text-xs font-medium text-gray-700">Novedades <span class="font-normal text-gray-400">(incidentes, pendientes con el cliente, paradas, materiales faltantes...)</span></label>
-              <textarea id="av-nov" rows="2" class="${CLASE_INPUT}">${escapeHtml(reg?.novedades || "")}</textarea>
-            </div>
+          <label for="av-comentario" class="mb-1 block text-xs font-medium text-gray-700">Comentarios del día (bitácora)</label>
+          <textarea id="av-comentario" rows="4" placeholder="Qué se hizo hoy, personal en obra, novedades, pendientes con el cliente..." class="${CLASE_INPUT}">${escapeHtml(comentario)}</textarea>
+          <div class="mt-2 flex items-center justify-between gap-3">
+            <span class="text-xs text-gray-400">${reg && comentario ? "Este día ya tiene comentario." : "Sin comentario este día."}</span>
+            <button id="av-guardar-bitacora" class="rounded-lg border border-primary px-4 py-1.5 text-xs font-semibold text-primary hover:bg-blue-50">Guardar comentario</button>
           </div>
-          <div class="mt-2 text-right"><button id="av-guardar-bitacora" class="rounded-lg border border-primary px-4 py-1.5 text-xs font-semibold text-primary hover:bg-blue-50">Guardar bitácora</button></div>
-        </div>
+        </div>`;
 
+      root.querySelector("#av-items").innerHTML = `
         <div class="rounded-xl border border-gray-200 bg-white p-5">
-          <div class="mb-3 flex items-baseline justify-between">
-            <h3 class="text-base font-bold text-gray-900">Cantidades ejecutadas este día</h3>
-            <p class="text-xs text-gray-500">Valor del día: <b class="tabular-nums text-gray-800">${formatoMoneda(valorDia)}</b>${cd ? ` · ${PCT.fmtPct(valorDia / cd, 2)} del contrato` : ""}</p>
+          <div class="mb-3 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h3 class="text-base font-bold text-gray-900">Avance por ítem</h3>
+              <p class="text-xs text-gray-500">Mueve lo de <b>este día</b>, el <b>acumulado</b> o el <b>%</b> de cualquier ítem. El cambio queda registrado el <b>${formatoFecha(fecha)}</b>.</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <label class="text-xs text-gray-600">Ejecutó
+                <select id="av-ejecutor" class="ml-1 rounded-lg border-gray-300 text-xs">
+                  <option value="contratista" ${ejecutorElegido === "contratista" ? "selected" : ""}>Contratista</option>
+                  <option value="propio" ${ejecutorElegido === "propio" ? "selected" : ""}>Personal propio</option>
+                </select>
+              </label>
+              <input id="av-buscar" type="search" value="${escapeHtml(filtro)}" placeholder="Buscar ítem..." class="w-44 rounded-lg border-gray-300 text-xs" />
+            </div>
           </div>
-          <div class="overflow-x-auto">
-            <table class="w-full text-sm"><thead class="text-left text-[11px] uppercase text-gray-500"><tr><th class="pb-2">Ítem</th><th class="pb-2">Ejecutó</th><th class="pb-2">Cantidad</th><th class="pb-2">Valor (venta)</th><th></th></tr></thead>
-            <tbody id="av-filas">${filas}</tbody></table>
+          <div class="max-h-[640px] overflow-auto rounded-lg border border-gray-100">
+            <table id="av-tabla" class="min-w-full text-sm">
+              <thead class="sticky top-0 z-10 bg-gray-50 text-left text-[11px] font-semibold uppercase text-gray-500">
+                <tr><th class="px-2 py-2">#</th><th class="px-2 py-2">Descripción</th><th class="px-2 py-2">Und</th><th class="px-2 py-2 text-right">Contratado</th><th class="px-2 py-2 text-right">Este día</th><th class="px-2 py-2 text-right">Acumulado</th><th class="px-2 py-2">% avance</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
           </div>
-
-          <form id="av-form-agregar" class="mt-4 grid grid-cols-1 gap-2 rounded-lg bg-gray-50 p-3 sm:grid-cols-12 sm:items-end">
-            <div class="sm:col-span-5">
-              <label class="mb-1 block text-xs font-medium text-gray-700">Ítem de la cotización</label>
-              <input id="av-item" list="av-lista-items" placeholder="Escribe para buscar: 1.1, cámara..." autocomplete="off" class="${CLASE_INPUT}" />
-              <datalist id="av-lista-items"></datalist>
-            </div>
-            <div class="sm:col-span-3">
-              <label class="mb-1 block text-xs font-medium text-gray-700">Ejecutó</label>
-              <select id="av-ejecutor" class="${CLASE_INPUT}">
-                <option value="contratista">Contratista</option>
-                <option value="propio">Personal propio</option>
-              </select>
-            </div>
-            <div class="sm:col-span-2">
-              <label class="mb-1 block text-xs font-medium text-gray-700">Cantidad</label>
-              <input id="av-cant" type="number" step="0.01" min="0" class="${CLASE_INPUT}" />
-            </div>
-            <div class="sm:col-span-2"><button type="submit" class="w-full rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">Agregar</button></div>
-            <p id="av-info-item" class="text-xs text-gray-500 sm:col-span-12"></p>
-          </form>
           <button id="av-nuevo-adicional" type="button" class="mt-2 text-xs font-semibold text-amber-700 hover:underline">¿Trabajo fuera del contrato? Crear ítem adicional</button>
         </div>`;
 
+      pintarTablaAvance();
       conectarDia();
+    };
+
+    // Deja en `nuevoTotalDia` lo ejecutado este día para el ítem: ajusta la
+    // línea del ejecutor elegido (las del otro ejecutor no se tocan).
+    const fijarDelDia = async (item, nuevoTotalDia) => {
+      const acum = PCT.num(PCT.ejecItem(item.id).cant_ejecutada);
+      const diaActual = delDia(item.id);
+      nuevoTotalDia = redondear(nuevoTotalDia);
+      if (redondear(acum - diaActual + nuevoTotalDia) < 0) {
+        mostrarAviso("El acumulado no puede quedar negativo.", "error");
+        return pintarTablaAvance();
+      }
+      if (redondear(nuevoTotalDia - diaActual) === 0) return pintarTablaAvance();
+      const reg = await asegurarRegistro();
+      const lineas = avItems.filter((a) => a.registro_id === reg.id && a.presupuesto_item_id === item.id);
+      const propia = lineas.find((a) => a.ejecutor === ejecutorElegido);
+      const otras = lineas.filter((a) => a !== propia).reduce((s, a) => s + PCT.num(a.cantidad), 0);
+      const nueva = redondear(nuevoTotalDia - otras);
+      let res;
+      if (propia) {
+        res = nueva === 0
+          ? await window.sb.from("avance_items").delete().eq("id", propia.id)
+          : await window.sb.from("avance_items").update({ cantidad: nueva }).eq("id", propia.id);
+      } else if (nueva !== 0) {
+        res = await window.sb.from("avance_items").insert({ registro_id: reg.id, proyecto_id: pid, presupuesto_item_id: item.id, cantidad: nueva, ejecutor: ejecutorElegido });
+      }
+      if (res?.error) throw res.error;
+      await refrescarTodo();
     };
 
     const conectarDia = () => {
@@ -213,98 +262,53 @@
         if (!iso) return;
         fecha = iso;
         pintarDia();
+        pintarLateral();
       };
       q("#av-fecha").addEventListener("change", (e) => irA(e.target.value));
       q("#av-ayer").addEventListener("click", () => irA(sumaDias(fecha, -1)));
       q("#av-manana").addEventListener("click", () => irA(sumaDias(fecha, 1)));
       q("#av-hoy").addEventListener("click", () => irA(PCT.hoyISO()));
 
-      // bitácora
+      // bitácora: un solo comentario por día
       q("#av-guardar-bitacora").addEventListener("click", async () => {
         try {
-          await asegurarRegistro({
-            clima: q("#av-clima").value.trim() || null,
-            observaciones: q("#av-obs").value.trim() || null,
-            novedades: q("#av-nov").value.trim() || null,
-          });
+          await asegurarRegistro({ observaciones: q("#av-comentario").value.trim() || null, novedades: null });
           await cargarAvance();
           pintarLateral();
-          mostrarAviso("Bitácora guardada.", "exito");
+          mostrarAviso("Comentario guardado.", "exito");
         } catch (err) {
-          manejarError(err, "No se pudo guardar la bitácora");
+          manejarError(err, "No se pudo guardar el comentario");
         }
       });
 
-      // lista de ítems para buscar (con etiqueta única)
-      const etiquetas = new Map();
-      const dl = q("#av-lista-items");
-      const usadas = new Set();
-      soloItems().forEach((i) => {
-        let et = etiquetaItem(i);
-        if (usadas.has(et)) et += ` [${i.id.slice(0, 4)}]`;
-        usadas.add(et);
-        etiquetas.set(et, i.id);
-      });
-      dl.innerHTML = [...etiquetas.keys()].map((et) => `<option value="${escapeHtml(et)}"></option>`).join("");
-
-      const itemElegido = () => {
-        const id = etiquetas.get(q("#av-item").value.trim());
-        return id ? itemPorId(id) : null;
-      };
-      q("#av-item").addEventListener("input", () => {
-        const it = itemElegido();
-        const info = q("#av-info-item");
-        if (!it) return (info.textContent = "");
-        const e = PCT.ejecItem(it.id);
-        const pend = PCT.num(it.cantidad) - PCT.num(e.cant_ejecutada);
-        info.textContent = `Contratado: ${PCT.fmtCant(it.cantidad)} ${it.unidad || ""} · Ejecutado: ${PCT.fmtCant(e.cant_ejecutada)} · ${pend >= 0 ? "Pendiente: " + PCT.fmtCant(pend) : "Excede lo contratado en " + PCT.fmtCant(-pend)}`;
-        // sugerir ejecutor: contratista si el proyecto tiene uno asignado
-        q("#av-ejecutor").value = PCT.estado.proyecto.contratista_principal_id ? "contratista" : "propio";
+      q("#av-ejecutor").addEventListener("change", (e) => (ejecutorElegido = e.target.value));
+      q("#av-buscar").addEventListener("input", (e) => {
+        filtro = e.target.value;
+        aplicarFiltro();
       });
 
-      q("#av-form-agregar").addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const it = itemElegido();
-        const cantidad = PCT.num(q("#av-cant").value);
-        if (!it) return mostrarAviso("Elige un ítem de la lista de la cotización.", "error");
-        if (cantidad <= 0) return mostrarAviso("La cantidad debe ser mayor que cero.", "error");
+      // mover el avance de un ítem
+      q("#av-tabla").addEventListener("change", async (e) => {
+        const inp = e.target;
+        const tr = inp.closest("tr[data-id]");
+        if (!tr || !inp.dataset.campo) return;
+        const item = itemPorId(tr.dataset.id);
+        if (!item) return;
+        // para devolver el foco a donde iba el usuario tras redibujar
+        const sig = document.activeElement?.closest?.("tr[data-id]") ? { id: document.activeElement.closest("tr[data-id]").dataset.id, campo: document.activeElement.dataset.campo } : null;
+        const valor = PCT.num(inp.value);
+        const acum = PCT.num(PCT.ejecItem(item.id).cant_ejecutada);
+        const dia = delDia(item.id);
+        let nuevoDia;
+        if (inp.dataset.campo === "dia") nuevoDia = valor;
+        else if (inp.dataset.campo === "acum") nuevoDia = dia + (valor - acum);
+        else nuevoDia = dia + ((valor / 100) * PCT.num(item.cantidad) - acum);
         try {
-          const reg = await asegurarRegistro();
-          // si ya existe una línea del mismo ítem y ejecutor ese día, se suma
-          const existente = avItems.find((a) => a.registro_id === reg.id && a.presupuesto_item_id === it.id && a.ejecutor === q("#av-ejecutor").value);
-          if (existente) {
-            const { error } = await window.sb.from("avance_items").update({ cantidad: PCT.num(existente.cantidad) + cantidad }).eq("id", existente.id);
-            if (error) throw error;
-          } else {
-            const { error } = await window.sb.from("avance_items").insert({
-              registro_id: reg.id, proyecto_id: pid, presupuesto_item_id: it.id, cantidad, ejecutor: q("#av-ejecutor").value,
-            });
-            if (error) throw error;
-          }
-          await refrescarTodo();
+          await fijarDelDia(item, nuevoDia);
         } catch (err) {
           manejarError(err, "No se pudo registrar el avance");
         }
-      });
-
-      // editar / borrar una línea
-      const tbody = q("#av-filas");
-      tbody.addEventListener("change", async (e) => {
-        const tr = e.target.closest("tr[data-aid]");
-        if (!tr || !e.target.dataset.f) return;
-        const campo = e.target.dataset.f;
-        const valor = campo === "cantidad" ? PCT.num(e.target.value) : e.target.value;
-        if (campo === "cantidad" && valor <= 0) return mostrarAviso("La cantidad debe ser mayor que cero (o quita la línea).", "error");
-        const { error } = await window.sb.from("avance_items").update({ [campo]: valor }).eq("id", tr.dataset.aid);
-        if (error) return manejarError(error, "No se pudo guardar el cambio");
-        await refrescarTodo();
-      });
-      tbody.addEventListener("click", async (e) => {
-        const btn = e.target.closest("[data-borrar]");
-        if (!btn) return;
-        const { error } = await window.sb.from("avance_items").delete().eq("id", btn.closest("tr").dataset.aid);
-        if (error) return manejarError(error, "No se pudo quitar la línea");
-        await refrescarTodo();
+        if (sig?.campo) root.querySelector(`#av-tabla tr[data-id="${sig.id}"] [data-campo="${sig.campo}"]`)?.focus();
       });
 
       q("#av-nuevo-adicional").addEventListener("click", abrirModalAdicional);
@@ -371,11 +375,10 @@
               }
               await Promise.all([PCT.recargarItems(), PCT.recargarEjec()]);
               pintarDia();
-              const inp = root.querySelector("#av-item");
-              inp.value = etiquetaItem(data);
-              inp.dispatchEvent(new Event("input"));
-              root.querySelector("#av-cant").focus();
-              mostrarAviso("Adicional creado. Ahora registra su cantidad ejecutada.", "exito");
+              const inp = root.querySelector(`#av-tabla tr[data-id="${data.id}"] [data-campo="dia"]`);
+              inp?.scrollIntoView({ block: "center" });
+              inp?.focus();
+              mostrarAviso("Adicional creado. Ahora registra su cantidad ejecutada en la tabla.", "exito");
             },
           },
         ],
@@ -455,13 +458,12 @@
             .map(
               (r) => `<tr data-fecha="${r.fecha}" class="cursor-pointer border-t border-gray-100 hover:bg-gray-50 ${r.fecha === fecha ? "bg-blue-50" : ""}">
                 <td class="py-1.5 pr-2 text-xs font-medium text-gray-800">${formatoFecha(r.fecha)}</td>
-                <td class="py-1.5 pr-2 text-xs text-gray-500">${escapeHtml(r.clima || "")}</td>
-                <td class="py-1.5 pr-2 text-right text-xs tabular-nums text-gray-700">${formatoMoneda(valorPorRegistro.get(r.id) || 0)}</td>
-                <td class="py-1.5 text-xs text-gray-500">${r.novedades ? `<span title="${escapeHtml(r.novedades)}" class="text-amber-600">● novedad</span>` : ""}</td>
+                <td class="py-1.5 pr-2 text-xs text-gray-500"><span class="line-clamp-1" title="${escapeHtml([r.observaciones, r.novedades].filter(Boolean).join(" · "))}">${escapeHtml([r.observaciones, r.novedades].filter(Boolean).join(" · ") || "—")}</span></td>
+                <td class="py-1.5 text-right text-xs tabular-nums text-gray-700">${formatoMoneda(valorPorRegistro.get(r.id) || 0)}</td>
               </tr>`
             )
             .join("")
-        : `<tr><td colspan="4" class="py-4 text-center text-sm text-gray-400">Sin días registrados.</td></tr>`;
+        : `<tr><td colspan="3" class="py-4 text-center text-sm text-gray-400">Sin días registrados.</td></tr>`;
 
       root.querySelector("#av-lateral").innerHTML = `
         <div class="rounded-xl border border-gray-200 bg-white p-5">

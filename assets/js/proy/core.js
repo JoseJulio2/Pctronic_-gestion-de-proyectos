@@ -15,6 +15,7 @@ window.PCT = window.PCT || {};
     items: [], // presupuesto_items ordenados (Cotización + costos)
     ejec: new Map(), // presupuesto_item_id -> fila de v_item_ejecucion
     tarifas: [], // tarifas_tecnicos
+    finanzas: { cdCortado: 0, gastado: 0 }, // para el margen bruto actual
   };
   PCT.catalogos = { empresas: [], clientes: [], contratistas: [] };
 
@@ -118,11 +119,27 @@ window.PCT = window.PCT || {};
     return PCT.estado.tarifas;
   };
 
+  // Lo facturado sale de los cortes de cliente; lo gastado, de Gastos.
+  PCT.recargarFinanzas = async () => {
+    const id = PCT.estado.proyecto.id;
+    const [c, g] = await Promise.all([
+      window.sb.from("cortes_cliente_items").select("cantidad, pu_venta_snapshot, corte:cortes_cliente!inner(proyecto_id)").eq("corte.proyecto_id", id),
+      window.sb.from("gastos").select("valor_total").eq("proyecto_id", id),
+    ]);
+    if (c.error) throw c.error;
+    if (g.error) throw g.error;
+    PCT.estado.finanzas = {
+      cdCortado: (c.data || []).reduce((s, x) => s + PCT.num(x.cantidad) * PCT.num(x.pu_venta_snapshot), 0),
+      gastado: (g.data || []).reduce((s, x) => s + PCT.num(x.valor_total), 0),
+    };
+    return PCT.estado.finanzas;
+  };
+
   PCT.cargarTodo = async (proyectoId) => {
     const { data, error } = await window.sb.from("proyectos").select(SELECT_PROYECTO).eq("id", proyectoId).single();
     if (error) throw error;
     PCT.estado.proyecto = data;
-    await Promise.all([PCT.recargarItems(), PCT.recargarEjec(), PCT.recargarTarifas()]);
+    await Promise.all([PCT.recargarItems(), PCT.recargarEjec(), PCT.recargarTarifas(), PCT.recargarFinanzas()]);
   };
 
   // --------------------------------------------------------------------
@@ -211,6 +228,19 @@ window.PCT = window.PCT || {};
     const c = PCT.contrato(p, cdCorte);
     const amortizacion = -c.total * (PCT.num(p.anticipo_porcentaje) / 100);
     return { ...c, amortizacion, neto: c.total + amortizacion };
+  };
+
+  // --------------------------------------------------------------------
+  // CÁLCULOS · margen bruto actual = facturado − gastado
+  // --------------------------------------------------------------------
+  // Facturado = ingreso sin IVA de todos los cortes de cliente (CD del corte
+  // con A+I+U en AIU; el IVA no es ingreso). Gastado = todo lo registrado en
+  // Gastos (única fuente del dinero que sale).
+  PCT.margenActual = (p = PCT.estado.proyecto, f = PCT.estado.finanzas) => {
+    const facturado = PCT.contrato(p, PCT.num(f.cdCortado)).ingreso;
+    const gastado = PCT.num(f.gastado);
+    const margen = facturado - gastado;
+    return { facturado, gastado, margen, pct: facturado ? margen / facturado : null };
   };
 
   // --------------------------------------------------------------------

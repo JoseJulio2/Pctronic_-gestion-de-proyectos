@@ -45,6 +45,8 @@
   const pintarEncabezado = () => {
     const p = PCT.estado.proyecto;
     const av = PCT.avanceFisico();
+    const mg = PCT.margenActual();
+    const colorMg = mg.margen > 0 ? "text-green-600" : mg.margen < 0 ? "text-red-600" : "text-gray-900";
     document.getElementById("encabezado-proyecto").innerHTML = `
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
@@ -62,6 +64,11 @@
           <div class="w-40">
             <div class="flex items-baseline justify-between text-xs text-gray-500"><span>Avance físico real</span><b class="text-sm text-gray-900">${PCT.fmtPct(av.pct)}</b></div>
             <div class="barra-progreso mt-1"><span style="width:${Math.round(av.pct * 100)}%"></span></div>
+          </div>
+          <div class="text-right" title="Facturado (cortes de cliente, sin IVA) ${formatoMoneda(mg.facturado)} − gastado ${formatoMoneda(mg.gastado)}">
+            <p class="text-xs text-gray-500">Margen bruto actual</p>
+            <p class="text-lg font-bold tabular-nums ${colorMg}">${formatoMoneda(mg.margen)}${mg.pct !== null ? ` <span class="text-xs font-semibold">(${PCT.fmtPct(mg.pct)})</span>` : ""}</p>
+            <p class="text-[11px] text-gray-400">Facturado ${formatoMoneda(mg.facturado)} · Gastado ${formatoMoneda(mg.gastado)}</p>
           </div>
           <div class="text-right">
             <p class="text-xs text-gray-500">Valor del contrato</p>
@@ -150,7 +157,7 @@
     root.innerHTML = `<div class="skeleton h-40 rounded-xl"></div>`;
     try {
       // siempre con datos frescos (otras personas pueden estar registrando avance)
-      await Promise.all([PCT.recargarProyecto(), PCT.recargarItems(), PCT.recargarEjec()]);
+      await Promise.all([PCT.recargarProyecto(), PCT.recargarItems(), PCT.recargarEjec(), PCT.recargarFinanzas()]);
       pintarEncabezado();
       root.innerHTML = "";
       if (!tab.listo) return renderProximamente(root, tab);

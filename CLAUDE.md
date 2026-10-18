@@ -78,6 +78,16 @@ siempre qué debe hacer él después (subir a GitHub, correr SQL en Supabase, et
   (`v_item_ejecucion`), y el usuario los ajusta. El corte del contratista toma solo lo ejecutado por
   `ejecutor = 'contratista'`, esté pagado o no. Cortes ilimitados.
 - Acta cliente: CD del corte → A, I, U, IVA sobre U → total → amortización del anticipo → neto a facturar.
+- **Margen bruto actual** (encabezado del proyecto, al lado del avance real) = facturado − gastado.
+  Facturado = ingreso sin IVA de TODOS los cortes de cliente (Σ cantidad × `pu_venta_snapshot`, con A+I+U si
+  es AIU); gastado = Σ `gastos.valor_total`. `PCT.recargarFinanzas` + `PCT.margenActual`. Queda en $0 hasta
+  que existan las pestañas Cortes (Fase 2) y Gastos (Fase 3).
+- **Avance diario** (Jose, oct. 2026): bitácora = un solo comentario por día (`avance_registros.observaciones`;
+  el clima ya no se usa y las novedades viejas se muestran unidas al comentario). Tabla "Avance por ítem" con
+  TODOS los ítems: este día, acumulado y % editables; cualquier cambio se guarda como la cantidad del día
+  elegido en `avance_items` (línea del ejecutor elegido; puede ser negativa para corregir, el acumulado nunca
+  < 0). El peso de cada ítem (valor/CD) es interno: **no mostrar valores en esa tabla**. Se conservan la curva
+  de avance real, el avance por capítulo y los días registrados.
 - Gastos: ÚNICA fuente de todo el dinero que sale. Una fila por ítem comprado o pago; no se corrigen compras viejas.
 - Retención de contratistas: persona natural declarante 4 %, no declarante 6 %, empresa 0 %.
 - Crear proyectos: solo admin (validado en pantalla y con RLS `solo_admin_insert_proyectos`).
