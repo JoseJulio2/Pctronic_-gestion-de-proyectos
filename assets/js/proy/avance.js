@@ -1,7 +1,7 @@
 // ============================================================================
 // PROYECTOS · pestaña AVANCE DIARIO.
 // Aquí se registra, día a día, lo que realmente se ejecutó en obra: cantidades
-// por ítem del presupuesto (incluidos los adicionales), quién lo ejecutó
+// por ítem de la cotización (incluidos los adicionales), quién lo ejecutó
 // (contratista o personal propio) y la bitácora del día (clima, observaciones,
 // novedades). De este registro sale el AVANCE FÍSICO REAL del proyecto — no
 // depende de cortes, facturas ni pagos — y de él se alimentan los cortes del
@@ -181,7 +181,7 @@
 
           <form id="av-form-agregar" class="mt-4 grid grid-cols-1 gap-2 rounded-lg bg-gray-50 p-3 sm:grid-cols-12 sm:items-end">
             <div class="sm:col-span-5">
-              <label class="mb-1 block text-xs font-medium text-gray-700">Ítem del presupuesto</label>
+              <label class="mb-1 block text-xs font-medium text-gray-700">Ítem de la cotización</label>
               <input id="av-item" list="av-lista-items" placeholder="Escribe para buscar: 1.1, cámara..." autocomplete="off" class="${CLASE_INPUT}" />
               <datalist id="av-lista-items"></datalist>
             </div>
@@ -266,7 +266,7 @@
         e.preventDefault();
         const it = itemElegido();
         const cantidad = PCT.num(q("#av-cant").value);
-        if (!it) return mostrarAviso("Elige un ítem de la lista del presupuesto.", "error");
+        if (!it) return mostrarAviso("Elige un ítem de la lista de la cotización.", "error");
         if (cantidad <= 0) return mostrarAviso("La cantidad debe ser mayor que cero.", "error");
         try {
           const reg = await asegurarRegistro();
@@ -333,7 +333,7 @@
         titulo: "Nuevo ítem adicional",
         ancho: "max-w-xl",
         html: `
-          <p class="mb-3 text-xs text-gray-500">Se agrega al Presupuesto marcado como ADICIONAL. Podrás avanzarlo aquí y cortarlo al cliente y al contratista como cualquier otro ítem; no cambia el valor base del contrato.</p>
+          <p class="mb-3 text-xs text-gray-500">Se agrega a la Cotización marcado como ADICIONAL. Podrás avanzarlo aquí y cortarlo al cliente y al contratista como cualquier otro ítem; no cambia el valor base del contrato.</p>
           <div class="grid grid-cols-2 gap-3">
             <div class="col-span-2"><label class="mb-1 block text-xs font-medium">Descripción *</label><input id="ad-desc" class="${CLASE_INPUT}" /></div>
             <div><label class="mb-1 block text-xs font-medium">Unidad</label><input id="ad-und" value="un" class="${CLASE_INPUT}" /></div>
@@ -441,7 +441,7 @@
               return `<div class="py-1.5"><div class="flex items-baseline justify-between text-xs"><span class="truncate pr-2 font-medium text-gray-700">${escapeHtml((c.codigo ? c.codigo + " · " : "") + c.descripcion)}</span><span class="tabular-nums text-gray-500">${PCT.fmtPct(pct, 0)}</span></div><div class="barra-progreso mt-1"><span style="width:${Math.round(pct * 100)}%"></span></div></div>`;
             })
             .join("")
-        : `<p class="py-3 text-sm text-gray-400">Agrega capítulos al Presupuesto para ver el avance por capítulo.</p>`;
+        : `<p class="py-3 text-sm text-gray-400">Agrega capítulos a la Cotización para ver el avance por capítulo.</p>`;
 
       // historial (más reciente primero)
       const valorPorRegistro = new Map();

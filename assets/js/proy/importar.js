@@ -1,9 +1,12 @@
 // ============================================================================
 // PROYECTOS · importar desde Excel.
-// Entiende dos formatos:
-//   1) la plantilla completa "PCT_Plantilla_Proyecto_v7" (hojas INICIO,
+// Entiende tres formatos:
+//   1) la COTIZACIÓN de Pctronic (hoja "Cotizador": encabezado con cliente y
+//      referencia, ítems por secciones Suministro / Instalación y, abajo, los
+//      totales con IVA pleno y con AIU). Es la plantilla que descarga la app.
+//   2) la plantilla completa "PCT_Plantilla_Proyecto_v7" (hojas INICIO,
 //      PRESUPUESTO y MANO DE OBRA), y
-//   2) la plantilla simple de una sola hoja que descarga la propia app.
+//   3) las hojas simples que exporta la propia app (cotización o costos).
 // Los encabezados se buscan por NOMBRE (no por posición), así que si agregas o
 // mueves una columna en el Excel la importación no se descuadra.
 // ============================================================================
@@ -50,6 +53,8 @@
 
   const aFechaISO = (v) => {
     if (!v) return null;
+    // número de serie de Excel (días desde 1899-12-30) cuando la celda no trae formato de fecha
+    if (typeof v === "number" && v > 20000 && v < 80000) return new Date(Date.UTC(1899, 11, 30) + Math.floor(v) * 86400000).toISOString().slice(0, 10);
     if (v instanceof Date && !isNaN(v)) {
       const d = new Date(v.getTime() + 12 * 3600 * 1000);
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -69,15 +74,19 @@
   };
 
   // --------------------------------------------------------------------
-  // PRESUPUESTO
+  // ÍTEMS (cotización y costos)
   // --------------------------------------------------------------------
   const COLUMNAS = [
     ["tipo", (h) => h === "tipo"],
-    ["codigo", (h) => h === "item"],
+    ["codigo", (h) => h === "item" || h === "#" || h === "no." || h === "n°"],
+    ["referencia", (h) => h === "referencia" || h === "ref."],
     ["descripcion", (h) => h === "descripcion"],
+    ["marca", (h) => h === "marca"],
     ["unidad", (h) => h === "und" || h === "unidad"],
     ["cantidad", (h) => h === "cant." || h === "cant" || h === "cantidad"],
-    ["pu_venta", (h) => h === "pu venta" || h === "precio venta" || h === "pu venta ($)"],
+    ["tiempo_entrega", (h) => h.startsWith("tiempo de entrega")],
+    ["observaciones", (h) => h.startsWith("observacion")],
+    ["pu_venta", (h) => h === "pu venta" || h === "precio venta" || h === "pu venta ($)" || h === "precio unitario" || h === "valor unitario"],
     ["cu_material", (h) => h.startsWith("c.u. material") && !h.includes("con iva")],
     ["cu_mano_obra", (h) => h.startsWith("c.u. mano de obra")],
     ["cu_transporte", (h) => h.startsWith("c.u. transporte")],
@@ -109,6 +118,11 @@
     return null;
   }
 
+  const ITEM_VACIO = {
+    codigo: null, referencia: null, marca: null, unidad: null, cantidad: 0, tiempo_entrega: null, observaciones: null,
+    pu_venta: 0, cu_material: 0, cu_mano_obra: 0, cu_transporte: 0, concepto_alquiler: null, cu_alquiler: 0, pu_contratista: null,
+  };
+
   const TIPO_FILA = (t, tieneCant) => {
     const n = PCT.norm(t);
     if (n.startsWith("capit")) return "capitulo";
@@ -117,16 +131,31 @@
     return "item";
   };
 
+  // Hoja de ítems: PRESUPUESTO (v7), la de la cotización o, si no, la primera.
+  const hojaDeItems = (libro) =>
+    buscarHoja(libro, "presupuesto") ||
+    libro.SheetNames.find((n) => PCT.norm(n).startsWith("cotiza")) ||
+    libro.SheetNames[0];
+
+  // Texto de una celda sin espacios sobrantes ("" si es número o vacía)
+  const textoCelda = (v) => (typeof v === "string" ? v.trim() : "");
+  // ¿La fila marca el final de la tabla de ítems? (bloque de totales de la cotización)
+  const esFinDeTabla = (f) =>
+    f.some((c) => {
+      const n = normEnc(c);
+      return n.startsWith("total oferta") || n === "subtotal" || n.startsWith("total costo directo");
+    });
+
   // Devuelve { items, origen, avisos }. `items` ya viene normalizado para la BD.
   PCT.parsearPresupuesto = (libro) => {
     const avisos = [];
-    const hojaNombre = buscarHoja(libro, "presupuesto") || libro.SheetNames[0];
+    const hojaNombre = hojaDeItems(libro);
     const filas = filasDeHoja(libro, hojaNombre);
     if (!filas) throw new Error("El archivo no tiene hojas.");
     const enc = filaEncabezado(filas);
     if (!enc) {
       throw new Error(
-        'No encontré la tabla del presupuesto: busco una fila de encabezados con "Descripción" y "Cant.". ¿Es la plantilla correcta?'
+        'No encontré la tabla de ítems: busco una fila de encabezados con "Descripción" y "Cant.". ¿Es la plantilla correcta?'
       );
     }
     const { fila: filaEnc, mapa } = enc;
@@ -148,9 +177,22 @@
     const items = [];
     for (let r = filaEnc + 1; r < filas.length; r++) {
       const f = filas[r];
+      if (esFinDeTabla(f)) break;
       const g = (k) => (mapa[k] === undefined ? "" : f[mapa[k]]);
       const descripcion = String(g("descripcion") ?? "").trim();
+      if (descripcion.startsWith("#")) continue; // #REF!, #N/A... (filas rotas del Excel)
       const cantidad = aNumero(g("cantidad"));
+
+      // Sin columna "Tipo" (formato cotización): una fila con un solo texto y
+      // sin descripción ni cantidad es el título de una sección → capítulo.
+      if (mapa.tipo === undefined && !descripcion && !cantidad) {
+        const textos = f.map(textoCelda).filter(Boolean);
+        if (textos.length === 1 && !textos[0].startsWith("#")) {
+          items.push({ ...ITEM_VACIO, tipo: "capitulo", descripcion: textos[0] });
+        }
+        continue;
+      }
+
       const tipo = TIPO_FILA(g("tipo"), cantidad > 0);
       if (!descripcion || !tipo) continue;
 
@@ -164,12 +206,17 @@
         pu_contratista = raw === "" || raw === null || raw === undefined ? null : aNumero(raw);
       }
 
+      const txt = (k) => (tipo === "item" ? String(g(k) ?? "").trim() || null : null);
       items.push({
         tipo,
         codigo: String(g("codigo") ?? "").trim() || null,
+        referencia: txt("referencia"),
         descripcion,
+        marca: txt("marca"),
         unidad: tipo === "item" ? String(g("unidad") ?? "").trim() || "un" : null,
         cantidad: tipo === "item" ? cantidad : 0,
+        tiempo_entrega: txt("tiempo_entrega"),
+        observaciones: txt("observaciones"),
         pu_venta: tipo === "item" ? aNumero(g("pu_venta")) : 0,
         cu_material: tipo === "item" ? aNumero(g("cu_material")) : 0,
         cu_mano_obra: tipo === "item" ? aNumero(g("cu_mano_obra")) : 0,
@@ -179,9 +226,187 @@
         pu_contratista: tipo === "item" ? pu_contratista : null,
       });
     }
-    if (!items.length) avisos.push("La hoja no tiene renglones de presupuesto todavía.");
+    if (!items.some((i) => i.tipo === "item")) avisos.push("La hoja no tiene ítems todavía.");
     if (puContratistaPorFila) avisos.push("Se leyeron también los precios del contratista de la hoja MANO DE OBRA.");
     return { items, hoja: hojaNombre, avisos };
+  };
+
+  // --------------------------------------------------------------------
+  // ENCABEZADO Y TOTALES DE LA COTIZACIÓN (formato "Cotizador" de Pctronic)
+  // --------------------------------------------------------------------
+  // Las etiquetas pueden estar en cualquier columna ("Cliente:", "Fecha:"...);
+  // el valor es la siguiente celda con contenido a la derecha.
+  const etiquetaNorm = (v) => normEnc(v).replace(/[:.]+$/, "").trim();
+
+  // Busca `pred(etiqueta)` en las filas [desde, hasta) y devuelve { fila, col }
+  const buscarEtiqueta = (filas, pred, desde = 0, hasta = filas.length) => {
+    for (let r = desde; r < Math.min(hasta, filas.length); r++) {
+      const f = filas[r];
+      for (let c = 0; c < f.length; c++) {
+        if (typeof f[c] === "string" && pred(etiquetaNorm(f[c]))) return { fila: r, col: c };
+      }
+    }
+    return null;
+  };
+  const valorDerecha = (filas, pos, maxSaltos = 4) => {
+    if (!pos) return null;
+    const f = filas[pos.fila];
+    for (let c = pos.col + 1; c <= pos.col + maxSaltos && c < f.length; c++) {
+      if (f[c] !== "" && f[c] !== null && f[c] !== undefined) return f[c];
+    }
+    return null;
+  };
+  // Primer número entre 0 y 1 a la derecha de la etiqueta (los % del bloque AIU)
+  const porcentajeDerecha = (filas, pos) => {
+    if (!pos) return null;
+    const f = filas[pos.fila];
+    for (let c = pos.col + 1; c < f.length; c++) {
+      const n = typeof f[c] === "number" ? f[c] : NaN;
+      if (n > 0 && n < 1) return Math.round(n * 100000) / 1000;
+    }
+    return null;
+  };
+
+  // Devuelve null si el libro no tiene el formato de cotización. Si lo tiene:
+  // { proyecto, clienteNombre, contratistaNombre, tarifas, esquemas, descuento }
+  // `esquemas` dice qué totales trae la cotización: { aiu: bool, iva: bool }.
+  PCT.parsearEncabezadoCotizacion = (libro) => {
+    const hoja = hojaDeItems(libro);
+    const filas = filasDeHoja(libro, hoja);
+    if (!filas) return null;
+    const enc = filaEncabezado(filas);
+    if (!enc || enc.mapa.tipo !== undefined) return null; // la v7 y lo exportado por la app traen "Tipo"
+    const arriba = (pred) => valorDerecha(filas, buscarEtiqueta(filas, pred, 0, enc.fila));
+    const abajo = (pred) => buscarEtiqueta(filas, pred, enc.fila + 1);
+    const texto = (v) => (v === null || v === undefined ? "" : String(v).trim());
+
+    const proyecto = {};
+    const notas = [];
+    const nombre = texto(arriba((l) => l === "descripcion" || l === "proyecto"));
+    if (nombre) proyecto.nombre = nombre;
+    const numero = texto(arriba((l) => l.startsWith("cotizacion no") || l === "cotizacion n°")) || texto(arriba((l) => l === "referencia"));
+    if (numero) proyecto.numero_cotizacion = numero;
+    const fecha = aFechaISO(arriba((l) => l === "fecha"));
+    if (fecha) proyecto.fecha_cotizacion = fecha;
+    const ciudad = texto(arriba((l) => l === "ciudad"));
+    if (ciudad) proyecto.ciudad = ciudad;
+    const clienteNombre = texto(arriba((l) => l === "cliente")) || null;
+
+    const validez = aFechaISO(arriba((l) => l.startsWith("validez")));
+    if (validez) notas.push(`Validez de la oferta: ${formatoFecha(validez)}`);
+    [["atencion", "Atención"], ["correo", "Correo"], ["telefono", "Teléfono"]].forEach(([l, t]) => {
+      const v = texto(arriba((x) => x === l));
+      if (v) notas.push(`${t}: ${v}`);
+    });
+
+    // Bloque AIU
+    const pA = porcentajeDerecha(filas, abajo((l) => l.startsWith("administracion")));
+    const pI = porcentajeDerecha(filas, abajo((l) => l.startsWith("imprevistos")));
+    const pU = porcentajeDerecha(filas, abajo((l) => l === "utilidad"));
+    const pIvaU = porcentajeDerecha(filas, abajo((l) => l.startsWith("iva sobre utilidad")));
+    // Bloque IVA pleno (suministros)
+    const pIva = porcentajeDerecha(filas, abajo((l) => l === "iva"));
+    const esquemas = { aiu: pA !== null || pU !== null, iva: pIva !== null };
+    if (pA !== null) proyecto.administracion_porcentaje = pA;
+    if (pI !== null) proyecto.imprevistos_porcentaje = pI;
+    if (pU !== null) proyecto.utilidad_porcentaje = pU;
+    if (pIvaU !== null || pIva !== null) proyecto.iva_porcentaje = pIvaU ?? pIva;
+    if (esquemas.aiu && !esquemas.iva) proyecto.tipo_contrato = "aiu";
+    if (esquemas.iva && !esquemas.aiu) proyecto.tipo_contrato = "iva";
+
+    const posDesc = abajo((l) => l === "descuento");
+    const descRaw = posDesc ? valorDerecha(filas, posDesc, 6) : null;
+    const descuento = typeof descRaw === "number" ? descRaw : 0;
+
+    // Condiciones comerciales y quién elaboró la oferta
+    const formaPago = texto(valorDerecha(filas, abajo((l) => l === "forma de pago")));
+    if (formaPago) {
+      notas.push(`Forma de pago: ${formaPago}`);
+      const m = formaPago.match(/(\d+(?:[.,]\d+)?)\s*%\s*(?:de\s+)?anticipo/i);
+      if (m) proyecto.anticipo_porcentaje = aNumero(m[1]);
+    }
+    [["garantia equipos", "Garantía equipos"], ["otras garantias", "Otras garantías"]].forEach(([l, t]) => {
+      const v = texto(valorDerecha(filas, abajo((x) => x === l)));
+      if (v) notas.push(`${t}: ${v}`);
+    });
+    const elaboro = texto(valorDerecha(filas, abajo((l) => l === "nombre")));
+    if (elaboro) proyecto.comercial_responsable = elaboro;
+    const preventa = texto(valorDerecha(filas, abajo((l) => l === "preventa")));
+    if (preventa) notas.push(`Preventa: ${preventa}`);
+    if (notas.length) proyecto.notas = notas.join("\n");
+
+    return { proyecto, clienteNombre, contratistaNombre: null, tarifas: [], esquemas, descuento };
+  };
+
+  // --------------------------------------------------------------------
+  // PLANTILLA DE COTIZACIÓN para descargar (mismo formato que usa Pctronic)
+  // --------------------------------------------------------------------
+  PCT.descargarPlantillaCotizacion = () => {
+    const filaItems = 13; // primera fila de ítems (en Excel, base 1)
+    const ultimaItems = 80; // espacio para ítems antes de los totales
+    const rango = `I${filaItems}:I${ultimaItems}`;
+    const aoa = [];
+    const poner = (fila, col, v) => {
+      while (aoa.length < fila) aoa.push([]);
+      aoa[fila - 1][col] = v;
+    };
+    const A = 0, B = 1, C = 2, D = 3, E = 4, F = 5, G = 6, H = 7, I = 8, J = 9;
+
+    poner(1, A, "COTIZACIÓN");
+    poner(2, C, window.PCTRONIC_CONFIG?.NOMBRE_EMPRESA || "Pctronic Seguridad Electrónica");
+    poner(4, C, "Referencia:"); poner(4, H, "Atencion:");
+    poner(5, C, "Descripcion:"); poner(5, D, "Nombre del proyecto"); poner(5, H, "Correo:");
+    poner(6, C, "Fecha:"); poner(6, H, "Cliente:");
+    poner(7, C, "Validez de la oferta:"); poner(7, H, "Telefono:");
+    poner(8, C, "Cotizacion No."); poner(8, H, "Ciudad:");
+    poner(10, A, "DETALLE");
+    ["#", "REFERENCIA", "DESCRIPCIÓN", "CANT.", "UNIDAD", "TIEMPO DE ENTREGA", "MARCA", "Precio Unitario", "Subtotal", "Observaciones"].forEach((t, c) => poner(11, c, t));
+
+    const ejemplo = [
+      ["Suministro"],
+      [1, "REF-001", "SUMINISTRO DE CÁMARA DOMO IP 4MP", 10, "UND", "10 días", "Marca", 850000],
+      [2, "REF-002", "SUMINISTRO DE CABLE UTP CAT6", 300, "ML", "10 días", "Marca", 4500],
+      ["Instalacion"],
+      [3, "PCT.SERV.INST", "INSTALACIÓN DE CÁMARA DOMO IP 4MP", 10, "UND", "30 días", "PCTronic", 120000],
+      [4, "PCT.SERV.INST", "INSTALACIÓN DE CABLE UTP CAT6", 300, "ML", "30 días", "PCTronic", 2000],
+    ];
+    let fila = filaItems - 1;
+    ejemplo.forEach((e) => {
+      if (e.length === 1) return poner(fila++, A, e[0]);
+      e.forEach((v, c) => poner(fila, c, v));
+      poner(fila, I, { f: `D${fila}*H${fila}` });
+      fila++;
+    });
+
+    let t = ultimaItems + 2;
+    poner(t++, A, "TOTAL OFERTA SUMINISTROS");
+    const sub = t;
+    poner(t, G, "SubTotal"); poner(t++, J, { f: `SUM(${rango})` });
+    poner(t, G, "Descuento"); poner(t++, J, 0);
+    poner(t, G, "SubTotal"); poner(t, J, { f: `J${sub}-(J${sub}*J${sub + 1})` }); t++;
+    poner(t, G, "IVA"); poner(t, H, 0.19); poner(t, J, { f: `J${t - 1}*H${t}` }); t++;
+    poner(t, G, "Total"); poner(t, J, { f: `J${t - 2}+J${t - 1}` }); t++;
+    t++;
+    poner(t++, A, "TOTAL OFERTA AIU INSTALACION");
+    const cd = t;
+    poner(t, G, "TOTAL COSTO DIRECTO OBRA"); poner(t++, J, { f: `SUM(${rango})` });
+    poner(t, G, "ADMINISTRACIÓN"); poner(t, I, 0.1); poner(t, J, { f: `J${cd}*I${t}` }); t++;
+    poner(t, G, "IMPREVISTOS"); poner(t, I, 0.03); poner(t, J, { f: `J${cd}*I${t}` }); t++;
+    poner(t, G, "UTILIDAD"); poner(t, I, 0.05); poner(t, J, { f: `J${cd}*I${t}` }); t++;
+    poner(t, G, "IVA SOBRE UTILIDAD"); poner(t, I, 0.19); poner(t, J, { f: `J${t - 1}*I${t}` }); t++;
+    poner(t, G, "TOTAL"); poner(t, J, { f: `SUM(J${cd}:J${t - 1})` }); t++;
+    t += 2;
+    poner(t, B, "CONDICIONES COMERCIALES"); poner(t++, F, "ELABORADO POR:");
+    poner(t, B, "GARANTIA EQUIPOS"); poner(t, C, "12 meses"); poner(t++, F, "NOMBRE");
+    poner(t, B, "FORMA DE PAGO"); poner(t, C, "30% anticipo, saldo con actas parciales"); poner(t++, F, "CORREO");
+    poner(t, B, "OTRAS GARANTIAS"); poner(t, C, "3 meses mano de obra"); poner(t++, F, "PREVENTA");
+    poner(t, B, "MONEDA"); poner(t, C, "Peso Colombiano");
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = [6, 16, 52, 8, 8, 14, 22, 14, 14, 18].map((wch) => ({ wch }));
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, ws, "Cotizador");
+    XLSX.writeFile(libro, "Plantilla_Cotizacion_Pctronic.xlsx");
   };
 
   // --------------------------------------------------------------------

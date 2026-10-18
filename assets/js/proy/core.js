@@ -1,6 +1,6 @@
 // ============================================================================
 // PROYECTOS · núcleo compartido (estado, carga de datos, cálculos y ayudas).
-// Todo cuelga de window.PCT para que cada pestaña (Inicio, Presupuesto,
+// Todo cuelga de window.PCT para que cada pestaña (Inicio, Cotización,
 // Avance diario...) viva en su propio archivo sin necesidad de compilar nada.
 // Las fórmulas replican las reglas de negocio de la plantilla de Excel v7.
 // ============================================================================
@@ -12,7 +12,7 @@ window.PCT = window.PCT || {};
   // --------------------------------------------------------------------
   PCT.estado = {
     proyecto: null,
-    items: [], // presupuesto_items ordenados
+    items: [], // presupuesto_items ordenados (Cotización + costos)
     ejec: new Map(), // presupuesto_item_id -> fila de v_item_ejecucion
     tarifas: [], // tarifas_tecnicos
   };
@@ -126,7 +126,7 @@ window.PCT = window.PCT || {};
   };
 
   // --------------------------------------------------------------------
-  // CÁLCULOS · hoja PRESUPUESTO
+  // CÁLCULOS · ítems (Cotización y Presupuesto de costos)
   // --------------------------------------------------------------------
   // Costos de un ítem. Material con IVA solo si el proyecto lo indica
   // (en AIU el IVA de las compras es costo).
@@ -154,7 +154,7 @@ window.PCT = window.PCT || {};
     };
   };
 
-  // Totales del presupuesto: contrato base (sin adicionales) y adicionales aparte.
+  // Totales de la cotización y de los costos: contrato base (sin adicionales) y adicionales aparte.
   PCT.resumenPresupuesto = (items = PCT.estado.items, p = PCT.estado.proyecto) => {
     const vacio = () => ({ venta: 0, material: 0, mo: 0, transp: 0, alq: 0, costo: 0, margen: 0, n: 0 });
     const base = vacio();
@@ -178,7 +178,7 @@ window.PCT = window.PCT || {};
   // --------------------------------------------------------------------
   // CÁLCULOS · hoja INICIO (valor del contrato, AIU, anticipo)
   // --------------------------------------------------------------------
-  // `cd` = costo directo de venta. Por defecto el que mantiene la base de datos.
+  // `cd` = costo directo = subtotal de la cotización. Por defecto el que mantiene la base de datos.
   PCT.contrato = (p = PCT.estado.proyecto, cd = null) => {
     const base = cd === null ? PCT.num(p.valor_antes_impuestos) : cd;
     const aiu = p.tipo_contrato === "aiu";

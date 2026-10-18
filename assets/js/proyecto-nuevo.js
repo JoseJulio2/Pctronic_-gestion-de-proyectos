@@ -1,6 +1,6 @@
 // ============================================================================
 // PROYECTO NUEVO (solo administradores). Una sola pantalla: datos + parámetros,
-// con opción de cargar todo desde la plantilla de Excel v7.
+// con opción de cargar todo desde el Excel de la cotización (o la plantilla v7).
 // ============================================================================
 (async () => {
   const { session, profile } = await window.pctronicReady;
@@ -28,8 +28,44 @@
   let importado = { items: [], tarifas: [] };
 
   // --------------------------------------------------------------------
-  // Importar plantilla
+  // Plantilla e importación
   // --------------------------------------------------------------------
+  document.getElementById("btn-descargar-plantilla").addEventListener("click", () => PCT.descargarPlantillaCotizacion());
+
+  // Si la cotización trae los dos totales (IVA pleno y AIU), se pregunta con
+  // cuál aceptó el cliente. Devuelve "aiu" | "iva" | null (si cancela).
+  const preguntarEsquema = (items, datos) =>
+    new Promise((resolve) => {
+      const cd = items.filter((i) => i.tipo === "item").reduce((s, i) => s + PCT.num(i.cantidad) * PCT.num(i.pu_venta), 0);
+      const base = { iva_porcentaje: datos.iva_porcentaje ?? 19, administracion_porcentaje: datos.administracion_porcentaje ?? 0, imprevistos_porcentaje: datos.imprevistos_porcentaje ?? 0, utilidad_porcentaje: datos.utilidad_porcentaje ?? 0, anticipo_porcentaje: 0 };
+      const tAiu = PCT.contrato({ ...base, tipo_contrato: "aiu" }, cd).total;
+      const tIva = PCT.contrato({ ...base, tipo_contrato: "iva" }, cd).total;
+      const opcion = (valor, titulo, detalle, total) => `
+        <label class="mt-2 flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 p-3 hover:border-primary">
+          <input type="radio" name="esquema" value="${valor}" class="mt-1 text-primary focus:ring-primary" ${valor === "aiu" ? "checked" : ""} />
+          <span class="flex-1"><b class="text-gray-900">${titulo}</b><br /><span class="text-xs text-gray-500">${detalle}</span></span>
+          <b class="tabular-nums text-gray-900">${formatoMoneda(total)}</b>
+        </label>`;
+      let elegido = null;
+      PCT.modal({
+        titulo: "¿Con qué oferta aceptó el cliente?",
+        html: `<p>La cotización trae dos totales sobre el mismo subtotal de <b>${formatoMoneda(cd)}</b>. Escoge cuál es el valor del contrato (lo puedes cambiar después en Inicio).</p>
+          ${opcion("aiu", "AIU", `A ${base.administracion_porcentaje}% · I ${base.imprevistos_porcentaje}% · U ${base.utilidad_porcentaje}% · IVA ${base.iva_porcentaje}% solo sobre la utilidad`, tAiu)}
+          ${opcion("iva", "IVA pleno", `IVA ${base.iva_porcentaje}% sobre todo el valor`, tIva)}`,
+        botones: [
+          { texto: "Cancelar", onClick: () => resolve(null) },
+          {
+            texto: "Usar esta oferta",
+            clase: PCT.BTN_PRIMARIO,
+            onClick: ({ el }) => {
+              elegido = el.querySelector('input[name="esquema"]:checked')?.value || "aiu";
+              resolve(elegido);
+            },
+          },
+        ],
+      });
+    });
+
   document.getElementById("input-plantilla").addEventListener("change", async (e) => {
     const file = e.target.files[0];
     e.target.value = "";
@@ -40,7 +76,7 @@
 
     try {
       const libro = await PCT.leerLibroExcel(file);
-      const inicio = PCT.parsearInicio(libro);
+      const inicio = PCT.parsearInicio(libro) || PCT.parsearEncabezadoCotizacion(libro);
       let pres = { items: [], avisos: [] };
       try {
         pres = PCT.parsearPresupuesto(libro);
@@ -62,7 +98,21 @@
         if (k) datos.contratista_principal_id = k.id;
         else avisos.push(`El contratista «${inicio.contratistaNombre}» no existe aún en Contratistas: créalo y selecciónalo aquí.`);
       }
-      if (!inicio) avisos.push("El archivo no tiene hoja INICIO: solo se cargó el presupuesto.");
+      if (!inicio) avisos.push("No encontré los datos del proyecto (cliente, referencia...) en el archivo: solo se cargaron los ítems.");
+      if (inicio?.descuento) avisos.push(`La cotización trae un descuento de ${PCT.fmtPct(inicio.descuento)}. La app todavía no lo aplica: ajusta los precios unitarios si el contrato quedó con descuento.`);
+      if (inicio?.esquemas?.aiu && inicio?.esquemas?.iva) {
+        const esquema = await preguntarEsquema(pres.items, datos);
+        if (!esquema) {
+          caja.classList.add("hidden");
+          return;
+        }
+        datos.tipo_contrato = esquema;
+      }
+      if (datos.tipo_contrato === "iva") {
+        datos.administracion_porcentaje = 0;
+        datos.imprevistos_porcentaje = 0;
+        datos.utilidad_porcentaje = 0;
+      }
 
       // Conservar lo que ya se hubiera elegido en los selectores si el Excel no lo trae
       const actual = PCT.leerFormInicio(form);
@@ -71,14 +121,14 @@
       importado = { items: pres.items, tarifas: inicio?.tarifas || [] };
       const caps = pres.items.filter((i) => i.tipo !== "item").length;
       caja.innerHTML = `
-        <p class="font-semibold text-green-700">✔ Plantilla leída</p>
+        <p class="font-semibold text-green-700">✔ Archivo leído</p>
         <ul class="mt-1 list-disc pl-5 text-gray-700">
-          ${inicio ? `<li>Datos y parámetros del proyecto cargados en el formulario.</li>` : ""}
+          ${inicio ? `<li>Datos y parámetros del proyecto cargados en el formulario${datos.tipo_contrato ? ` (contrato ${datos.tipo_contrato === "aiu" ? "AIU" : "IVA pleno"})` : ""}.</li>` : ""}
           ${importado.tarifas.length ? `<li>${importado.tarifas.length} cargos de tarifas de técnicos.</li>` : ""}
-          <li>${pres.items.length - caps} ítems y ${caps} capítulos/subcapítulos de presupuesto${pres.items.some((i) => i.pu_contratista !== null) ? " (con precios del contratista)" : ""}.</li>
+          <li>${pres.items.length - caps} ítems y ${caps} capítulos/secciones de la cotización${pres.items.some((i) => i.pu_contratista !== null) ? " (con precios del contratista)" : ""}.</li>
         </ul>
         ${[...avisos, ...pres.avisos].map((a) => `<p class="mt-1 text-xs text-amber-700">⚠ ${escapeHtml(a)}</p>`).join("")}
-        <p class="mt-2 text-xs text-gray-500">Revisa el formulario y pulsa «Crear proyecto». El presupuesto se guarda al crear.</p>`;
+        <p class="mt-2 text-xs text-gray-500">Revisa el formulario y pulsa «Crear proyecto». La cotización se guarda al crear.</p>`;
     } catch (err) {
       caja.innerHTML = `<p class="text-red-600">${escapeHtml(err.message || "No se pudo leer el archivo")}</p>`;
     }
@@ -114,7 +164,7 @@
       if (importado.items.length) await PCT.insertarItems(proyecto.id, importado.items);
 
       mostrarAviso("Proyecto creado.", "exito");
-      window.location.href = `proyecto-detalle.html?id=${proyecto.id}&tab=presupuesto`;
+      window.location.href = `proyecto-detalle.html?id=${proyecto.id}&tab=cotizacion`;
     } catch (err) {
       manejarError(err, "No se pudo crear el proyecto");
       btn.disabled = false;

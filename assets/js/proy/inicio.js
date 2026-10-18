@@ -75,7 +75,7 @@
           ${campo(
             "f_tipo_contrato",
             "Tipo de contrato",
-            `<select id="f_tipo_contrato" class="${CLASE_INPUT}"><option value="aiu">AIU (IVA sobre la utilidad)</option><option value="iva">IVA simple</option></select>`,
+            `<select id="f_tipo_contrato" class="${CLASE_INPUT}"><option value="aiu">AIU (IVA sobre la utilidad)</option><option value="iva">IVA pleno (sobre todo el valor)</option></select>`,
             "", "sm:col-span-2"
           )}
           ${pct("f_iva_porcentaje", "En AIU se cobra sobre la utilidad.", "IVA")}
@@ -260,9 +260,9 @@
         `<div class="flex items-baseline justify-between gap-3 py-1.5 ${fuerte ? "border-t border-gray-200 pt-2.5 font-bold text-gray-900" : "text-gray-600"}"><dt>${t}</dt><dd class="tabular-nums">${formatoMoneda(v)}</dd></div>`;
       root.querySelector("#panel-contrato").innerHTML = `
         <h3 class="mb-1 text-base font-bold text-gray-900">Valor del contrato <span class="text-xs font-normal text-gray-400">(calculado)</span></h3>
-        <p class="mb-3 text-xs text-gray-400">Sale solo de los ítems del Presupuesto. No se digita.</p>
+        <p class="mb-3 text-xs text-gray-400">Sale de la Cotización: cantidad × precio unitario de cada ítem, más los impuestos del tipo de contrato.</p>
         <dl class="text-sm">
-          ${fila("Costo directo (valor de venta)", c.cd)}
+          ${fila("Subtotal cotización (costo directo)", c.cd)}
           ${p.tipo_contrato === "aiu" ? fila(`Administración (${p.administracion_porcentaje}%)`, c.admin) + fila(`Imprevistos (${p.imprevistos_porcentaje}%)`, c.imprev) + fila(`Utilidad (${p.utilidad_porcentaje}%)`, c.util) : ""}
           ${fila(p.tipo_contrato === "aiu" ? `IVA sobre utilidad (${p.iva_porcentaje}%)` : `IVA (${p.iva_porcentaje}%)`, c.iva)}
           ${fila("TOTAL CONTRATO", c.total, true)}

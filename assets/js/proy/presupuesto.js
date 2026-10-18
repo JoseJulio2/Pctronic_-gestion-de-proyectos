@@ -1,21 +1,30 @@
 // ============================================================================
-// PROYECTOS · pestaña PRESUPUESTO (hoja PRESUPUESTO de la plantilla).
-// Tabla madre del proyecto: capítulos, subcapítulos e ítems con precio de venta
-// y costos unitarios por tipo. Edición directa en la tabla (se guarda al salir
-// de cada celda), filtro por categoría, ítems adicionales e importar/exportar.
+// PROYECTOS · pestañas COTIZACIÓN y PRESUPUESTO DE COSTOS.
+// Las dos leen la misma tabla madre (presupuesto_items), ítem por ítem:
+//   · Cotización: lo que se le ofreció al cliente (referencia, marca, cantidad,
+//     precio unitario...). De aquí sale el valor del contrato. Aquí se agregan,
+//     mueven y borran filas.
+//   · Presupuesto de costos: los costos internos de cada ítem de la cotización
+//     (material, mano de obra, transporte, alquiler, PU contratista) y el
+//     margen. El cliente nunca ve estas columnas.
+// Edición directa en la tabla (se guarda al salir de cada celda).
 // ============================================================================
 (function (PCT) {
   // --------------------------------------------------------------------
   // Definición de columnas
   // --------------------------------------------------------------------
-  // t: text | num | money (editables)   calc: valor calculado (solo lectura)
+  // t: text | num | money | check (editables)   calc: valor calculado
   const COL = {
-    codigo: { l: "Ítem", f: "codigo", t: "text", w: "w-16" },
-    descripcion: { l: "Descripción", f: "descripcion", t: "text", w: "min-w-[240px]" },
+    codigo: { l: "#", f: "codigo", t: "text", w: "w-14" },
+    referencia: { l: "Referencia", f: "referencia", t: "text", w: "w-28" },
+    descripcion: { l: "Descripción", f: "descripcion", t: "text", w: "min-w-[260px]" },
+    marca: { l: "Marca", f: "marca", t: "text", w: "w-24" },
     unidad: { l: "Und", f: "unidad", t: "text", w: "w-14" },
     cantidad: { l: "Cant.", f: "cantidad", t: "num", w: "w-20" },
-    pu_venta: { l: "PU venta", f: "pu_venta", t: "money", w: "w-28" },
-    total_venta: { l: "Total venta", calc: (c) => c.totalVenta, fmt: "money" },
+    tiempo_entrega: { l: "Tiempo de entrega", f: "tiempo_entrega", t: "text", w: "w-24" },
+    pu_venta: { l: "Precio unitario", f: "pu_venta", t: "money", w: "w-28" },
+    total_venta: { l: "Subtotal", calc: (c) => c.totalVenta, fmt: "money" },
+    observaciones: { l: "Observaciones", f: "observaciones", t: "text", w: "min-w-[160px]" },
     cu_material: { l: "C.U. material (sin IVA)", f: "cu_material", t: "money", w: "w-28" },
     cu_mat_iva: { l: "C.U. material (con IVA)", calc: (c) => c.cuMatIva, fmt: "money" },
     tot_material: { l: "Total material", calc: (c) => c.totMaterial, fmt: "money" },
@@ -35,21 +44,33 @@
     es_adicional: { l: "Adic.", f: "es_adicional", t: "check", w: "w-12" },
   };
 
-  const VISTAS = {
-    general: {
-      etiqueta: "General",
-      cols: ["codigo", "descripcion", "unidad", "cantidad", "pu_venta", "total_venta", "cu_material", "cu_mat_iva", "cu_mano_obra", "cu_transporte", "concepto_alquiler", "cu_alquiler", "costo_total", "margen", "margen_pct", "pu_contratista", "es_adicional"],
-      resumen: "total_venta",
+  const COLS_COTIZACION = ["codigo", "referencia", "descripcion", "marca", "unidad", "cantidad", "tiempo_entrega", "pu_venta", "total_venta", "observaciones", "es_adicional"];
+
+  const MODOS = {
+    cotizacion: {
+      vistas: {
+        cotizacion: { etiqueta: "Cotización", cols: COLS_COTIZACION, resumen: "total_venta" },
+        adicionales: { etiqueta: "Adicionales", cols: COLS_COTIZACION, resumen: "total_venta", soloAdicionales: true },
+      },
+      editaFilas: true,
+      // en la cotización todo es editable
+      soloLectura: new Set(),
     },
-    material: { etiqueta: "Materiales y equipos", cols: ["codigo", "descripcion", "unidad", "cantidad", "cu_material", "cu_mat_iva", "tot_material"], resumen: "tot_material" },
-    mo: { etiqueta: "Mano de obra", cols: ["codigo", "descripcion", "unidad", "cantidad", "cu_mano_obra", "tot_mo", "pu_contratista", "tot_contratista", "ahorro_mo"], resumen: "tot_mo" },
-    transporte: { etiqueta: "Transporte y otros", cols: ["codigo", "descripcion", "unidad", "cantidad", "cu_transporte", "tot_transp"], resumen: "tot_transp" },
-    alquiler: { etiqueta: "Alquileres", cols: ["codigo", "descripcion", "unidad", "cantidad", "concepto_alquiler", "cu_alquiler", "tot_alq"], resumen: "tot_alq" },
-    adicionales: {
-      etiqueta: "Adicionales",
-      cols: ["codigo", "descripcion", "unidad", "cantidad", "pu_venta", "total_venta", "cu_material", "cu_mano_obra", "pu_contratista", "costo_total", "margen", "es_adicional"],
-      resumen: "total_venta",
-      soloAdicionales: true,
+    costos: {
+      vistas: {
+        general: {
+          etiqueta: "General",
+          cols: ["codigo", "descripcion", "unidad", "cantidad", "total_venta", "cu_material", "cu_mat_iva", "cu_mano_obra", "cu_transporte", "concepto_alquiler", "cu_alquiler", "costo_total", "margen", "margen_pct", "pu_contratista"],
+          resumen: "costo_total",
+        },
+        material: { etiqueta: "Materiales y equipos", cols: ["codigo", "descripcion", "unidad", "cantidad", "cu_material", "cu_mat_iva", "tot_material"], resumen: "tot_material" },
+        mo: { etiqueta: "Mano de obra", cols: ["codigo", "descripcion", "unidad", "cantidad", "cu_mano_obra", "tot_mo", "pu_contratista", "tot_contratista", "ahorro_mo"], resumen: "tot_mo" },
+        transporte: { etiqueta: "Transporte y otros", cols: ["codigo", "descripcion", "unidad", "cantidad", "cu_transporte", "tot_transp"], resumen: "tot_transp" },
+        alquiler: { etiqueta: "Alquileres", cols: ["codigo", "descripcion", "unidad", "cantidad", "concepto_alquiler", "cu_alquiler", "tot_alq"], resumen: "tot_alq" },
+      },
+      editaFilas: false,
+      // lo que viene de la cotización se cambia en la pestaña Cotización
+      soloLectura: new Set(["codigo", "descripcion", "unidad", "cantidad", "pu_venta", "es_adicional"]),
     },
   };
 
@@ -61,8 +82,35 @@
     return fmt === "pct" ? PCT.fmtPct(valor) : formatoMoneda(valor);
   };
 
-  PCT.renderPresupuesto = (root) => {
-    let vista = "general";
+  // Columnas de costo que se exportan / importan en el Presupuesto de costos
+  const ENC_COSTOS = ["#", "Descripción", "Und", "Cant.", "PU venta", "C.U. material (sin IVA)", "C.U. mano de obra", "C.U. transporte / otros", "Concepto alquiler", "C.U. alquiler", "PU contratista"];
+
+  PCT.renderCotizacion = (root) => renderTabla(root, "cotizacion");
+  PCT.renderCostos = (root) => renderTabla(root, "costos");
+
+  function renderTabla(root, modo) {
+    const M = MODOS[modo];
+    const VISTAS = M.vistas;
+    let vista = Object.keys(VISTAS)[0];
+
+    const btnBarra = "flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50";
+    const barraExcel =
+      modo === "cotizacion"
+        ? `<button type="button" id="pres-plantilla" class="${btnBarra}"><span class="material-symbols-outlined text-[16px]">download</span> Plantilla</button>
+           <label class="${btnBarra} cursor-pointer"><span class="material-symbols-outlined text-[16px]">upload</span> Importar cotización<input type="file" id="pres-importar" accept=".xlsx,.xls" class="hidden" /></label>
+           <button type="button" id="pres-exportar" class="${btnBarra}"><span class="material-symbols-outlined text-[16px]">table_view</span> Exportar</button>`
+        : `<button type="button" id="pres-exportar" class="${btnBarra}"><span class="material-symbols-outlined text-[16px]">table_view</span> Exportar costos</button>
+           <label class="${btnBarra} cursor-pointer"><span class="material-symbols-outlined text-[16px]">upload</span> Importar costos<input type="file" id="pres-importar" accept=".xlsx,.xls" class="hidden" /></label>`;
+
+    const barraFilas = M.editaFilas
+      ? `<div class="flex flex-wrap items-center gap-2">
+          <button type="button" data-nuevo="capitulo" class="rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-blue-100">+ Capítulo</button>
+          <button type="button" data-nuevo="subcapitulo" class="rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-blue-100">+ Subcapítulo</button>
+          <button type="button" data-nuevo="item" class="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700">+ Ítem</button>
+          <button type="button" data-nuevo="adicional" class="rounded-lg bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-200">+ Ítem adicional</button>
+          <span class="text-xs text-gray-400">Los adicionales salen en obra y no estaban en el contrato: se avanzan y se cortan como cualquier ítem, pero no cambian el valor base del contrato.</span>
+        </div>`
+      : `<p class="text-xs text-gray-500">Los costos internos de cada ítem de la Cotización. El cliente no ve esta información. Para agregar o quitar ítems, o cambiar cantidades y precios de venta, ve a la pestaña <b>Cotización</b>.</p>`;
 
     root.innerHTML = `
       <div class="space-y-4">
@@ -70,20 +118,10 @@
 
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div id="pres-vistas" class="flex flex-wrap gap-1.5"></div>
-          <div class="flex flex-wrap items-center gap-2">
-            <button type="button" id="pres-plantilla" class="flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"><span class="material-symbols-outlined text-[16px]">download</span> Plantilla</button>
-            <label class="flex cursor-pointer items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"><span class="material-symbols-outlined text-[16px]">upload</span> Importar Excel<input type="file" id="pres-importar" accept=".xlsx,.xls" class="hidden" /></label>
-            <button type="button" id="pres-exportar" class="flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"><span class="material-symbols-outlined text-[16px]">table_view</span> Exportar</button>
-          </div>
+          <div class="flex flex-wrap items-center gap-2">${barraExcel}</div>
         </div>
 
-        <div class="flex flex-wrap items-center gap-2">
-          <button type="button" data-nuevo="capitulo" class="rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-blue-100">+ Capítulo</button>
-          <button type="button" data-nuevo="subcapitulo" class="rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-blue-100">+ Subcapítulo</button>
-          <button type="button" data-nuevo="item" class="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700">+ Ítem</button>
-          <button type="button" data-nuevo="adicional" class="rounded-lg bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-200">+ Ítem adicional</button>
-          <span class="text-xs text-gray-400">Los adicionales salen en obra y no estaban en el contrato: se avanzan y se cortan como cualquier ítem, pero no cambian el valor base del contrato.</span>
-        </div>
+        ${barraFilas}
 
         <div class="overflow-x-auto rounded-xl border border-gray-200 bg-white">
           <table class="min-w-full text-sm" id="pres-tabla">
@@ -101,20 +139,38 @@
     // ------------------------------------------------------------------
     // KPIs
     // ------------------------------------------------------------------
+    const tarjeta = (titulo, valor, sub = "") => `
+      <div class="rounded-xl border border-gray-200 bg-white p-3">
+        <p class="text-[11px] font-semibold uppercase text-gray-500">${titulo}</p>
+        <p class="mt-1 text-lg font-bold tabular-nums text-gray-900">${valor}</p>
+        ${sub ? `<p class="text-xs text-gray-400">${sub}</p>` : ""}
+      </div>`;
+
     const pintarKpis = () => {
       const { base, adic } = PCT.resumenPresupuesto();
-      const tarjeta = (titulo, valor, sub = "") => `
-        <div class="rounded-xl border border-gray-200 bg-white p-3">
-          <p class="text-[11px] font-semibold uppercase text-gray-500">${titulo}</p>
-          <p class="mt-1 text-lg font-bold tabular-nums text-gray-900">${valor}</p>
-          ${sub ? `<p class="text-xs text-gray-400">${sub}</p>` : ""}
-        </div>`;
-      root.querySelector("#pres-kpis").innerHTML =
-        tarjeta("Venta (costo directo)", formatoMoneda(base.venta), `${base.n} ítems del contrato`) +
-        tarjeta("Costo presupuestado", formatoMoneda(base.costo), `Mat. ${formatoMoneda(base.material)}`) +
-        tarjeta("Margen bruto", formatoMoneda(base.margen), base.venta ? PCT.fmtPct(base.margen / base.venta) + " sobre la venta" : "") +
-        tarjeta("Mano de obra", formatoMoneda(base.mo), `Transp. ${formatoMoneda(base.transp)} · Alq. ${formatoMoneda(base.alq)}`) +
-        tarjeta("Adicionales (venta)", formatoMoneda(adic.venta), `${adic.n} ítems fuera de contrato`);
+      const p = PCT.estado.proyecto;
+      let html;
+      if (modo === "cotizacion") {
+        const c = PCT.contrato(p, base.venta);
+        const aiu = p.tipo_contrato === "aiu";
+        html =
+          tarjeta("Subtotal cotización", formatoMoneda(base.venta), `${base.n} ítems · costo directo`) +
+          (aiu
+            ? tarjeta("A + I + U", formatoMoneda(c.admin + c.imprev + c.util), `A ${p.administracion_porcentaje}% · I ${p.imprevistos_porcentaje}% · U ${p.utilidad_porcentaje}%`)
+            : tarjeta(`IVA (${p.iva_porcentaje}%)`, formatoMoneda(c.iva), "IVA pleno sobre todo el valor")) +
+          (aiu ? tarjeta(`IVA sobre utilidad (${p.iva_porcentaje}%)`, formatoMoneda(c.iva)) : tarjeta("Ingreso sin IVA", formatoMoneda(c.ingreso))) +
+          tarjeta("Valor del contrato", formatoMoneda(c.total), aiu ? "Esquema AIU" : "Esquema IVA pleno") +
+          tarjeta("Adicionales", formatoMoneda(adic.venta), `${adic.n} ítems fuera de contrato`);
+      } else {
+        const sinCosto = PCT.estado.items.filter((i) => i.tipo === "item" && !i.es_adicional && PCT.calcItem(i, p).costoTotal === 0).length;
+        html =
+          tarjeta("Venta (costo directo)", formatoMoneda(base.venta), `${base.n} ítems de la cotización`) +
+          tarjeta("Costo presupuestado", formatoMoneda(base.costo), `Mat. ${formatoMoneda(base.material)}`) +
+          tarjeta("Margen bruto", formatoMoneda(base.margen), base.venta ? PCT.fmtPct(base.margen / base.venta) + " sobre la venta" : "") +
+          tarjeta("Mano de obra", formatoMoneda(base.mo), `Transp. ${formatoMoneda(base.transp)} · Alq. ${formatoMoneda(base.alq)}`) +
+          tarjeta("Ítems sin costo", String(sinCosto), sinCosto ? "Faltan costos por llenar" : "Todos tienen costo");
+      }
+      root.querySelector("#pres-kpis").innerHTML = html;
     };
 
     // ------------------------------------------------------------------
@@ -134,7 +190,20 @@
     // ------------------------------------------------------------------
     // Tabla
     // ------------------------------------------------------------------
-    const celdaEditable = (col, item) => {
+    const celdaLectura = (col, item) => {
+      const v = item[col.f];
+      let txt;
+      if (col.t === "check") txt = v ? "Sí" : "";
+      else if (col.t === "money") txt = v === null || v === undefined ? "" : formatoMoneda(v);
+      else if (col.t === "num") txt = PCT.fmtCant(v);
+      else txt = escapeHtml(v ?? "");
+      const der = col.t === "money" || col.t === "num" ? "text-right tabular-nums" : "";
+      return `<span class="block px-1.5 py-1 text-xs text-gray-700 ${der}">${txt}</span>`;
+    };
+
+    const celdaEditable = (key, item) => {
+      const col = COL[key];
+      if (M.soloLectura.has(key)) return celdaLectura(col, item);
       const v = item[col.f];
       if (col.t === "check") {
         return `<input type="checkbox" data-f="${col.f}" ${v ? "checked" : ""} class="rounded border-gray-300 text-amber-600 focus:ring-amber-500" />`;
@@ -149,13 +218,15 @@
       return `<input data-f="${col.f}" data-t="text" value="${escapeHtml(v ?? "")}" class="${CLASE_CELDA}" />`;
     };
 
-    const acciones = (item, idx, total) => `
-      <td class="whitespace-nowrap px-1 text-right">
-        <button data-acc="subir" ${idx === 0 ? "disabled" : ""} title="Subir" class="text-gray-400 hover:text-gray-800 disabled:opacity-30"><span class="material-symbols-outlined text-[16px]">arrow_upward</span></button>
-        <button data-acc="bajar" ${idx === total - 1 ? "disabled" : ""} title="Bajar" class="text-gray-400 hover:text-gray-800 disabled:opacity-30"><span class="material-symbols-outlined text-[16px]">arrow_downward</span></button>
-        <button data-acc="insertar" title="Insertar un ítem debajo" class="text-gray-400 hover:text-primary"><span class="material-symbols-outlined text-[16px]">playlist_add</span></button>
-        <button data-acc="borrar" title="Eliminar" class="text-gray-400 hover:text-red-600"><span class="material-symbols-outlined text-[16px]">delete</span></button>
-      </td>`;
+    const acciones = (idx, total) =>
+      M.editaFilas
+        ? `<td class="whitespace-nowrap px-1 text-right">
+            <button data-acc="subir" ${idx === 0 ? "disabled" : ""} title="Subir" class="text-gray-400 hover:text-gray-800 disabled:opacity-30"><span class="material-symbols-outlined text-[16px]">arrow_upward</span></button>
+            <button data-acc="bajar" ${idx === total - 1 ? "disabled" : ""} title="Bajar" class="text-gray-400 hover:text-gray-800 disabled:opacity-30"><span class="material-symbols-outlined text-[16px]">arrow_downward</span></button>
+            <button data-acc="insertar" title="Insertar un ítem debajo" class="text-gray-400 hover:text-primary"><span class="material-symbols-outlined text-[16px]">playlist_add</span></button>
+            <button data-acc="borrar" title="Eliminar" class="text-gray-400 hover:text-red-600"><span class="material-symbols-outlined text-[16px]">delete</span></button>
+          </td>`
+        : "";
 
     const filasVisibles = () => {
       const v = VISTAS[vista];
@@ -166,16 +237,19 @@
     const pintarTabla = () => {
       const v = VISTAS[vista];
       const cols = v.cols.map((k) => COL[k]);
-      thead.innerHTML = `<tr>${cols.map((c) => `<th class="px-2 py-2 ${c.w || ""} ${c.calc || c.t === "money" || c.t === "num" ? "text-right" : ""}">${c.l}</th>`).join("")}<th class="w-28"></th></tr>`;
+      thead.innerHTML = `<tr>${cols.map((c) => `<th class="px-2 py-2 ${c.w || ""} ${c.calc || c.t === "money" || c.t === "num" ? "text-right" : ""}">${c.l}</th>`).join("")}${M.editaFilas ? `<th class="w-28"></th>` : ""}</tr>`;
 
       const items = filasVisibles();
       if (!items.length) {
         tbody.innerHTML = `<tr><td colspan="${cols.length + 1}" class="px-4 py-10 text-center text-gray-400">${
           v.soloAdicionales
             ? "Aún no hay ítems adicionales. Usa «+ Ítem adicional» cuando salga trabajo fuera del contrato."
-            : "El presupuesto está vacío. Agrega capítulos e ítems, o importa la plantilla de Excel."
+            : modo === "cotizacion"
+              ? "La cotización está vacía. Agrega capítulos e ítems, o importa el Excel de la cotización."
+              : "Todavía no hay ítems. Primero llena la pestaña Cotización."
         }</td></tr>`;
         tfoot.innerHTML = "";
+        pintarKpis();
         return;
       }
 
@@ -186,27 +260,27 @@
             const span = cols.length - 1;
             return `
               <tr data-id="${item.id}" class="${esCap ? "bg-blue-100/70 font-bold" : "bg-blue-50/70 font-semibold"}">
-                <td class="px-1">${celdaEditable(COL.codigo, item)}</td>
+                <td class="px-1">${celdaEditable("codigo", item)}</td>
                 <td colspan="${span}" class="px-1">
                   <div class="flex items-center gap-3">
                     <span class="text-[10px] font-bold uppercase text-primary">${esCap ? "Capítulo" : "Subcapítulo"}</span>
-                    <div class="flex-1">${celdaEditable(COL.descripcion, item)}</div>
+                    <div class="flex-1">${celdaEditable("descripcion", item)}</div>
                     <span class="subtotal-cap whitespace-nowrap pr-2 text-xs tabular-nums text-gray-600"></span>
                   </div>
                 </td>
-                ${acciones(item, idx, items.length)}
+                ${acciones(idx, items.length)}
               </tr>`;
           }
           return `
             <tr data-id="${item.id}" class="border-t border-gray-100 ${item.es_adicional ? "bg-amber-50/60" : ""}">
-              ${cols
-                .map((c) =>
-                  c.calc
-                    ? `<td class="px-2 text-right text-xs tabular-nums text-gray-700" data-calc="${v.cols.find((k) => COL[k] === c)}"></td>`
-                    : `<td class="px-1">${celdaEditable(c, item)}</td>`
+              ${v.cols
+                .map((k) =>
+                  COL[k].calc
+                    ? `<td class="px-2 text-right text-xs tabular-nums text-gray-700" data-calc="${k}"></td>`
+                    : `<td class="px-1">${celdaEditable(k, item)}</td>`
                 )
                 .join("")}
-              ${acciones(item, idx, items.length)}
+              ${acciones(idx, items.length)}
             </tr>`;
         })
         .join("");
@@ -222,18 +296,16 @@
       const porId = new Map(PCT.estado.items.map((i) => [i.id, i]));
       tbody.querySelectorAll("tr[data-id]").forEach((tr) => {
         const item = porId.get(tr.dataset.id);
-        if (!item) return;
-        if (item.tipo === "item") {
-          const c = PCT.calcItem(item, p);
-          tr.querySelectorAll("[data-calc]").forEach((td) => {
-            const col = COL[td.dataset.calc];
-            td.textContent = fmtCalc(col.calc(c), col.fmt);
-            if (td.dataset.calc === "margen" || td.dataset.calc === "margen_pct" || td.dataset.calc === "ahorro_mo") {
-              const num = col.calc(c);
-              td.classList.toggle("text-red-600", typeof num === "number" && num < 0);
-            }
-          });
-        }
+        if (!item || item.tipo !== "item") return;
+        const c = PCT.calcItem(item, p);
+        tr.querySelectorAll("[data-calc]").forEach((td) => {
+          const col = COL[td.dataset.calc];
+          const num = col.calc(c);
+          td.textContent = fmtCalc(num, col.fmt);
+          if (["margen", "margen_pct", "ahorro_mo"].includes(td.dataset.calc)) {
+            td.classList.toggle("text-red-600", typeof num === "number" && num < 0);
+          }
+        });
       });
 
       // Subtotales por capítulo/subcapítulo (según la vista activa)
@@ -245,25 +317,20 @@
           const s = todos[j];
           if (s.tipo === "capitulo" || (it.tipo === "subcapitulo" && s.tipo === "subcapitulo")) break;
           if (s.tipo !== "item" || s.es_adicional) continue;
-          const c = PCT.calcItem(s, p);
-          suma += COL[v.resumen].calc(c) || 0;
+          suma += COL[v.resumen].calc(PCT.calcItem(s, p)) || 0;
         }
         const span = tbody.querySelector(`tr[data-id="${it.id}"] .subtotal-cap`);
         if (span) span.textContent = formatoMoneda(suma);
       });
 
-      // Totales de la vista
-      const t = { venta: 0, costo: 0, margen: 0, resumen: 0 };
+      // Total de la vista
+      let total = 0;
       filasVisibles().forEach((it) => {
         const c = PCT.calcItem(it, p);
-        if (!c) return;
-        t.resumen += COL[v.resumen].calc(c) || 0;
-        t.venta += c.totalVenta;
-        t.costo += c.costoTotal;
-        t.margen += c.margen;
+        if (c) total += COL[v.resumen].calc(c) || 0;
       });
       const ncols = v.cols.length;
-      tfoot.innerHTML = `<tr><td colspan="${Math.max(ncols - 1, 1)}" class="px-3 py-2 text-right uppercase">Total ${v.etiqueta}${v.soloAdicionales ? "" : " (incluye adicionales)"}</td><td class="px-2 py-2 text-right tabular-nums">${formatoMoneda(t.resumen)}</td><td></td></tr>`;
+      tfoot.innerHTML = `<tr><td colspan="${Math.max(ncols - 1, 1)}" class="px-3 py-2 text-right uppercase">Total ${v.etiqueta}${v.soloAdicionales ? "" : " (incluye adicionales)"}</td><td class="px-2 py-2 text-right tabular-nums">${formatoMoneda(total)}</td>${M.editaFilas ? "<td></td>" : ""}</tr>`;
       pintarKpis();
     };
 
@@ -275,32 +342,31 @@
       PCT.emit("proyecto");
     };
 
+    const CAMPOS_TEXTO_OPCIONAL = ["codigo", "referencia", "marca", "tiempo_entrega", "observaciones", "concepto_alquiler"];
+
     tbody.addEventListener("change", async (e) => {
       const inp = e.target;
       const tr = inp.closest("tr[data-id]");
       if (!tr || !inp.dataset.f) return;
       const item = PCT.estado.items.find((i) => i.id === tr.dataset.id);
       const campo = inp.dataset.f;
+      const col = COL[Object.keys(COL).find((k) => COL[k].f === campo)];
       let valor;
       if (inp.type === "checkbox") valor = inp.checked;
-      else if (inp.dataset.t === "money") {
-        valor = inp.value.trim() === "" && COL[Object.keys(COL).find((k) => COL[k].f === campo)].nullable ? null : valorMoneda(inp);
-      } else if (inp.dataset.t === "num") valor = PCT.num(inp.value);
+      else if (inp.dataset.t === "money") valor = inp.value.trim() === "" && col.nullable ? null : valorMoneda(inp);
+      else if (inp.dataset.t === "num") valor = PCT.num(inp.value);
       else valor = inp.value.trim();
 
       if (campo === "descripcion" && !valor) {
         inp.value = item.descripcion;
         return mostrarAviso("La descripción no puede quedar vacía.", "error");
       }
-      if (campo === "concepto_alquiler" || campo === "codigo") valor = valor || null;
+      if (CAMPOS_TEXTO_OPCIONAL.includes(campo)) valor = valor || null;
       const { error } = await window.sb.from("presupuesto_items").update({ [campo]: valor }).eq("id", item.id);
       if (error) return manejarError(error, "No se pudo guardar el cambio");
       item[campo] = valor;
-      if (campo === "es_adicional") {
-        pintarTabla();
-      } else {
-        actualizarCalculos();
-      }
+      if (campo === "es_adicional") pintarTabla();
+      else actualizarCalculos();
       if (["cantidad", "pu_venta", "es_adicional"].includes(campo)) {
         await refrescarProyecto();
         await PCT.recargarEjec();
@@ -308,7 +374,7 @@
     });
 
     // ------------------------------------------------------------------
-    // Alta, movimiento y borrado de filas
+    // Alta, movimiento y borrado de filas (solo en Cotización)
     // ------------------------------------------------------------------
     const ordenFinal = () => (PCT.estado.items.length ? Math.max(...PCT.estado.items.map((i) => PCT.num(i.orden))) + 1 : 1);
 
@@ -326,7 +392,6 @@
       const { data, error } = await window.sb.from("presupuesto_items").insert(fila).select().single();
       if (error) return manejarError(error, "No se pudo agregar la fila");
       await PCT.recargarItems();
-      if (adicional && vista !== "adicionales" && vista !== "general") vista = "general";
       pintarVistas();
       pintarTabla();
       await refrescarProyecto();
@@ -413,91 +478,135 @@
     });
 
     // ------------------------------------------------------------------
-    // Excel: plantilla, importar, exportar
+    // Excel
     // ------------------------------------------------------------------
-    const ENCABEZADOS = ["Tipo", "Ítem", "Descripción", "Und", "Cant.", "PU venta", "C.U. material (sin IVA)", "C.U. mano de obra", "C.U. transporte / otros", "Concepto alquiler", "C.U. alquiler", "PU contratista"];
-
-    root.querySelector("#pres-plantilla").addEventListener("click", () => {
-      descargarPlantillaExcel("Plantilla_Presupuesto_Pctronic.xlsx", ENCABEZADOS, [
-        ["Capítulo", "1", "CCTV"],
-        ["Ítem", "1.1", "Cámara domo IP 4MP", "un", 10, 850000, 520000, 60000, 15000, "", 0, 45000],
-        ["Ítem", "1.2", "Cable UTP cat6", "m", 500, 4500, 2200, 800, 100, "", 0, 1500],
-        ["Capítulo", "2", "Alquileres"],
-        ["Ítem", "2.1", "Andamio certificado", "día", 5, 90000, 0, 0, 0, "Andamio", 30000, ""],
-      ]);
-    });
-
-    root.querySelector("#pres-exportar").addEventListener("click", () => {
-      const p = PCT.estado.proyecto;
-      const filas = PCT.estado.items.map((i) => {
-        if (i.tipo !== "item") return [i.tipo === "capitulo" ? "Capítulo" : "Subcapítulo", i.codigo || "", i.descripcion];
-        const c = PCT.calcItem(i, p);
-        return [
-          i.es_adicional ? "Ítem (adicional)" : "Ítem", i.codigo || "", i.descripcion, i.unidad || "", PCT.num(i.cantidad), PCT.num(i.pu_venta),
-          PCT.num(i.cu_material), PCT.num(i.cu_mano_obra), PCT.num(i.cu_transporte), i.concepto_alquiler || "", PCT.num(i.cu_alquiler),
-          i.pu_contratista === null ? "" : PCT.num(i.pu_contratista), c.totalVenta, c.costoTotal, c.margen,
-        ];
-      });
-      const datos = [[...ENCABEZADOS, "Total venta", "Costo total", "Margen $"], ...filas];
-      const hoja = XLSX.utils.aoa_to_sheet(datos);
+    const nombreArchivo = (prefijo) => `${prefijo}_${(PCT.estado.proyecto.nombre || "proyecto").replace(/[^\w\-]+/g, "_")}.xlsx`;
+    const guardarHoja = (datos, hojaNombre, archivo) => {
       const libro = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(libro, hoja, "Presupuesto");
-      XLSX.writeFile(libro, `Presupuesto_${(p.nombre || "proyecto").replace(/[^\w\-]+/g, "_")}.xlsx`);
-    });
+      XLSX.utils.book_append_sheet(libro, XLSX.utils.aoa_to_sheet(datos), hojaNombre);
+      XLSX.writeFile(libro, archivo);
+    };
 
-    root.querySelector("#pres-importar").addEventListener("change", async (e) => {
-      const file = e.target.files[0];
-      e.target.value = "";
-      if (!file) return;
-      let resultado;
-      try {
-        const libro = await PCT.leerLibroExcel(file);
-        resultado = PCT.parsearPresupuesto(libro);
-      } catch (err) {
-        return mostrarAviso(err.message, "error");
-      }
-      const { items, avisos } = resultado;
-      if (!items.length) return mostrarAviso(avisos[0] || "No se encontraron renglones para importar.", "error");
+    if (modo === "cotizacion") {
+      root.querySelector("#pres-plantilla").addEventListener("click", () => PCT.descargarPlantillaCotizacion());
 
-      const caps = items.filter((i) => i.tipo !== "item").length;
-      const hayEjecucion = [...PCT.estado.ejec.values()].some(
-        (r) => PCT.num(r.cant_ejecutada) > 0 || PCT.num(r.cant_cortada_cliente) > 0 || PCT.num(r.cant_cortada_mo) > 0
-      );
-      const hayItems = PCT.estado.items.length > 0;
+      root.querySelector("#pres-exportar").addEventListener("click", () => {
+        const p = PCT.estado.proyecto;
+        const enc = ["Tipo", "#", "Referencia", "Descripción", "Cant.", "Unidad", "Tiempo de entrega", "Marca", "Precio unitario", "Subtotal", "Observaciones"];
+        const filas = PCT.estado.items.map((i) => {
+          if (i.tipo !== "item") return [i.tipo === "capitulo" ? "Capítulo" : "Subcapítulo", i.codigo || "", "", i.descripcion];
+          return [
+            i.es_adicional ? "Ítem (adicional)" : "Ítem", i.codigo || "", i.referencia || "", i.descripcion, PCT.num(i.cantidad), i.unidad || "",
+            i.tiempo_entrega || "", i.marca || "", PCT.num(i.pu_venta), PCT.calcItem(i, p).totalVenta, i.observaciones || "",
+          ];
+        });
+        guardarHoja([enc, ...filas], "Cotización", nombreArchivo("Cotizacion"));
+      });
 
-      const ejecutar = async (reemplazar) => {
+      root.querySelector("#pres-importar").addEventListener("change", async (e) => {
+        const file = e.target.files[0];
+        e.target.value = "";
+        if (!file) return;
+        let resultado;
         try {
-          if (reemplazar) {
-            const { error } = await window.sb.from("presupuesto_items").delete().eq("proyecto_id", PCT.estado.proyecto.id);
+          resultado = PCT.parsearPresupuesto(await PCT.leerLibroExcel(file));
+        } catch (err) {
+          return mostrarAviso(err.message, "error");
+        }
+        const { items, avisos } = resultado;
+        if (!items.length) return mostrarAviso(avisos[0] || "No se encontraron renglones para importar.", "error");
+
+        const caps = items.filter((i) => i.tipo !== "item").length;
+        const hayEjecucion = [...PCT.estado.ejec.values()].some(
+          (r) => PCT.num(r.cant_ejecutada) > 0 || PCT.num(r.cant_cortada_cliente) > 0 || PCT.num(r.cant_cortada_mo) > 0
+        );
+
+        const ejecutar = async (reemplazar) => {
+          try {
+            if (reemplazar) {
+              const { error } = await window.sb.from("presupuesto_items").delete().eq("proyecto_id", PCT.estado.proyecto.id);
+              if (error) throw error;
+            }
+            const desde = reemplazar ? 0 : Math.ceil(ordenFinal() - 1);
+            await PCT.insertarItems(PCT.estado.proyecto.id, items, desde);
+            await PCT.recargarItems();
+            await PCT.recargarEjec();
+            pintarTabla();
+            await refrescarProyecto();
+            mostrarAviso(`Se importaron ${items.length - caps} ítems y ${caps} capítulos.`, "exito");
+          } catch (err) {
+            manejarError(err, "No se pudo importar la cotización");
+          }
+        };
+
+        if (!PCT.estado.items.length) return ejecutar(false);
+        PCT.modal({
+          titulo: "Importar cotización",
+          html: `<p>El archivo trae <b>${items.length - caps} ítems</b> y ${caps} capítulos/subcapítulos. El proyecto ya tiene ${PCT.estado.items.length} filas en la cotización.</p>
+            ${avisos.map((a) => `<p class="mt-2 text-xs text-gray-500">${escapeHtml(a)}</p>`).join("")}
+            ${hayEjecucion ? `<p class="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-800">Como ya hay avance o cortes registrados, solo se puede AGREGAR al final (reemplazar borraría ese historial).</p>` : ""}`,
+          botones: [
+            { texto: "Cancelar" },
+            ...(hayEjecucion ? [] : [{ texto: "Reemplazar todo", clase: PCT.BTN_PELIGRO, onClick: () => ejecutar(true) }]),
+            { texto: "Agregar al final", clase: PCT.BTN_PRIMARIO, onClick: () => ejecutar(false) },
+          ],
+        });
+      });
+    } else {
+      // Exportar costos → llenar en Excel → importar costos (se cruzan por # y descripción)
+      root.querySelector("#pres-exportar").addEventListener("click", () => {
+        const filas = PCT.estado.items
+          .filter((i) => i.tipo === "item")
+          .map((i) => [
+            i.codigo || "", i.descripcion, i.unidad || "", PCT.num(i.cantidad), PCT.num(i.pu_venta),
+            PCT.num(i.cu_material), PCT.num(i.cu_mano_obra), PCT.num(i.cu_transporte), i.concepto_alquiler || "", PCT.num(i.cu_alquiler),
+            i.pu_contratista === null ? "" : PCT.num(i.pu_contratista),
+          ]);
+        guardarHoja([ENC_COSTOS, ...filas], "Costos", nombreArchivo("Costos"));
+      });
+
+      root.querySelector("#pres-importar").addEventListener("change", async (e) => {
+        const file = e.target.files[0];
+        e.target.value = "";
+        if (!file) return;
+        let filas;
+        try {
+          filas = PCT.parsearPresupuesto(await PCT.leerLibroExcel(file)).items.filter((i) => i.tipo === "item");
+        } catch (err) {
+          return mostrarAviso(err.message, "error");
+        }
+        const clave = (codigo, desc) => `${PCT.norm(codigo)}|${PCT.norm(desc)}`;
+        const porClave = new Map();
+        PCT.estado.items.filter((i) => i.tipo === "item").forEach((i) => porClave.set(clave(i.codigo, i.descripcion), i));
+        const cambios = [];
+        let sinPareja = 0;
+        filas.forEach((f) => {
+          const it = porClave.get(clave(f.codigo, f.descripcion));
+          if (!it) return sinPareja++;
+          cambios.push({
+            id: it.id,
+            datos: {
+              cu_material: f.cu_material, cu_mano_obra: f.cu_mano_obra, cu_transporte: f.cu_transporte,
+              concepto_alquiler: f.concepto_alquiler, cu_alquiler: f.cu_alquiler, pu_contratista: f.pu_contratista,
+            },
+          });
+        });
+        if (!cambios.length) return mostrarAviso("Ningún renglón del archivo coincide con los ítems de la cotización (se cruzan por # y descripción).", "error");
+        try {
+          for (const c of cambios) {
+            const { error } = await window.sb.from("presupuesto_items").update(c.datos).eq("id", c.id);
             if (error) throw error;
           }
-          const desde = reemplazar ? 0 : Math.ceil(ordenFinal() - 1);
-          await PCT.insertarItems(PCT.estado.proyecto.id, items, desde);
           await PCT.recargarItems();
-          await PCT.recargarEjec();
           pintarTabla();
-          await refrescarProyecto();
-          mostrarAviso(`Se importaron ${items.length - caps} ítems y ${caps} capítulos.`, "exito");
+          mostrarAviso(`Se actualizaron los costos de ${cambios.length} ítems.${sinPareja ? ` ${sinPareja} renglones del archivo no coincidieron con ningún ítem.` : ""}`, sinPareja ? "info" : "exito");
         } catch (err) {
-          manejarError(err, "No se pudo importar el presupuesto");
+          manejarError(err, "No se pudieron importar los costos");
         }
-      };
-
-      if (!hayItems) return ejecutar(false);
-      PCT.modal({
-        titulo: "Importar presupuesto",
-        html: `<p>El archivo trae <b>${items.length - caps} ítems</b> y ${caps} capítulos/subcapítulos. El proyecto ya tiene ${PCT.estado.items.length} filas en el presupuesto.</p>
-          ${avisos.map((a) => `<p class="mt-2 text-xs text-gray-500">${escapeHtml(a)}</p>`).join("")}
-          ${hayEjecucion ? `<p class="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-800">Como ya hay avance o cortes registrados, solo se puede AGREGAR al final (reemplazar borraría ese historial).</p>` : ""}`,
-        botones: [
-          { texto: "Cancelar" },
-          ...(hayEjecucion ? [] : [{ texto: "Reemplazar todo", clase: PCT.BTN_PELIGRO, onClick: () => ejecutar(true) }]),
-          { texto: "Agregar al final", clase: PCT.BTN_PRIMARIO, onClick: () => ejecutar(false) },
-        ],
       });
-    });
+    }
 
     pintarVistas();
     pintarTabla();
-  };
+  }
 })(window.PCT);

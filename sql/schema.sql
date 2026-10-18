@@ -13,7 +13,9 @@
 --
 -- Mapa plantilla Excel → tablas:
 --   INICIO ............ proyectos (+ parámetros) · tarifas_tecnicos
---   PRESUPUESTO ....... presupuesto_items (tabla madre: venta + costos por tipo)
+--   PRESUPUESTO ....... presupuesto_items (tabla madre). En la app se ve en dos
+--                       pestañas: COTIZACIÓN (precios al cliente → valor del
+--                       contrato) y PRESUPUESTO DE COSTOS (costos internos).
 --   (NUEVO) AVANCE .... avance_registros (bitácora diaria) · avance_items
 --   CORTES CLIENTE .... cortes_cliente · cortes_cliente_items
 --   MANO DE OBRA ...... cortes_mo · cortes_mo_items · registro_mo_propia
@@ -286,10 +288,11 @@ create table public.tarifas_tecnicos (
 );
 
 -- ----------------------------------------------------------------------------
--- 7. PRESUPUESTO (hoja PRESUPUESTO: tabla madre del proyecto)
+-- 7. COTIZACIÓN + PRESUPUESTO DE COSTOS (tabla madre del proyecto)
 -- ----------------------------------------------------------------------------
 -- Una sola tabla con capítulos, subcapítulos e ítems. Cada ÍTEM trae el precio
--- de venta (lo que se cobra al cliente) y los costos unitarios por tipo
+-- unitario de la cotización (lo que se cobra al cliente; de aquí sale el valor
+-- del contrato) y los costos unitarios internos por tipo
 -- (material, mano de obra, transporte, alquiler) → margen por ítem.
 -- `es_adicional` marca ítems que salen en obra y NO estaban en el contrato:
 -- se pueden avanzar y cortar (cliente y contratista) igual que los demás, pero
@@ -299,11 +302,15 @@ create table public.presupuesto_items (
   proyecto_id uuid not null references public.proyectos(id) on delete cascade,
   tipo text not null default 'item' check (tipo in ('capitulo','subcapitulo','item')),
   orden double precision not null default 0,   -- decimal: permite insertar entre dos filas sin renumerar
-  codigo text,                                  -- columna "Ítem" (1, 1.1, 2.3 ...)
+  codigo text,                                  -- columna "Ítem" / "#" (1, 1.1, 2.3 ...)
+  referencia text,                              -- referencia del equipo (ej. GST-M200)
   descripcion text not null,
+  marca text,
   unidad text default 'un',
   cantidad numeric(14,2) not null default 0,
-  pu_venta numeric(14,2) not null default 0,
+  tiempo_entrega text,                          -- ej. "10 días"
+  observaciones text,
+  pu_venta numeric(14,2) not null default 0,    -- precio unitario de la cotización al cliente
   cu_material numeric(14,2) not null default 0,       -- sin IVA
   cu_mano_obra numeric(14,2) not null default 0,
   cu_transporte numeric(14,2) not null default 0,

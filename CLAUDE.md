@@ -21,18 +21,34 @@ siempre qué debe hacer él después (subir a GitHub, correr SQL en Supabase, et
 - `assets/js/util.js` formato de moneda/fechas, `mostrarAviso`, `manejarError`, campos de moneda.
 - **Proyectos** (el núcleo, en rediseño): `proyecto-nuevo.html`, `proyecto-detalle.html` y los módulos
   `assets/js/proy/*.js`, todos colgados de `window.PCT`:
-  `core.js` (estado, carga, cálculos, modal) · `importar.js` (Excel v7) · `inicio.js` (datos y parámetros)
-  · `presupuesto.js` · `avance.js` (avance diario) · `documentos.js`. Cada pestaña se redibuja al abrirse.
-- `sql/schema.sql` esquema completo. **Hoy hace DROP + CREATE de todo** porque solo hay datos de prueba.
-  Cuando haya datos reales hay que pasar a migraciones que no borren nada — avísale a Jose antes.
+  `core.js` (estado, carga, cálculos, modal) · `importar.js` (Excel: cotización de Pctronic y plantilla v7,
+  + plantilla de cotización descargable) · `inicio.js` (datos y parámetros) · `presupuesto.js` (pestañas
+  **Cotización** y **Presupuesto de costos**) · `avance.js` (avance diario) · `documentos.js`.
+  Cada pestaña se redibuja al abrirse.
+- **Nombres**: en pantalla se dice **Cotización** (precios al cliente) y **Presupuesto de costos** (costos
+  internos). Nunca "Presupuesto" a secas para lo que paga el cliente. En la BD sigue siendo una sola tabla
+  `presupuesto_items` (no se renombró para no romper nada).
+- `sql/schema.sql` esquema completo. **Hace DROP + CREATE de todo** (solo para montar una base desde cero).
+  Los cambios nuevos van además en `sql/migracion_*.sql` que no borran nada (`add column if not exists`);
+  a Jose se le pide correr solo la migración.
 - `docs/PCT_Plantilla_Proyecto_v7.xlsx` plantilla de Excel que es la **especificación funcional** de Proyectos
-  (hoja GUÍA APP = tablas y reglas de negocio). Léela antes de construir una fase nueva.
+  (hoja GUÍA APP = tablas y reglas de negocio). Léela antes de construir una fase nueva. Su hoja PRESUPUESTO
+  equivale en la app a Cotización + Presupuesto de costos.
+- **Formato real de la cotización de Pctronic** (hoja "Cotizador"): encabezado (Referencia, Descripción = nombre
+  del proyecto, Fecha, Validez, Cliente, Ciudad, Atención, Correo, Teléfono, Cotización No.), ítems con columnas
+  `# · REFERENCIA · DESCRIPCIÓN · CANT. · UNIDAD · TIEMPO DE ENTREGA · MARCA · Precio Unitario · Subtotal ·
+  Observaciones`, agrupados por secciones (Suministro, Instalación → capítulos), y abajo dos totales sobre el
+  mismo subtotal: "TOTAL OFERTA SUMINISTROS" (IVA pleno) y "TOTAL OFERTA AIU INSTALACION" (A, I, U, IVA sobre U).
+  Trae solo precios de venta, no costos. Al importarla en Nuevo proyecto se pregunta con cuál oferta aceptó el
+  cliente (`tipo_contrato` = `aiu` | `iva`). Puede traer filas `#REF!`: se ignoran.
 
 ## Reglas de negocio (no las cambies sin hablar con Jose)
 
-- **Valor del contrato NO se digita**: `proyectos.valor_antes_impuestos` = suma de `total_venta` de los ítems
-  del presupuesto que no son adicionales (lo mantiene el trigger `recalcular_proyecto`).
-- AIU: Total = CD·(1+A+I+U) + CD·U·IVA. El IVA solo recae sobre la Utilidad. Contrato IVA simple: CD·(1+IVA).
+- **El valor del contrato sale de la Cotización** (confirmado con Jose, oct. 2026): `proyectos.valor_antes_impuestos`
+  = Σ cantidad × precio unitario (`pu_venta`) de los ítems de la cotización que no son adicionales (lo mantiene
+  el trigger `recalcular_proyecto`). No se digita aparte. Los costos (Presupuesto de costos) NO afectan el contrato.
+- AIU: Total = CD·(1+A+I+U) + CD·U·IVA. El IVA solo recae sobre la Utilidad. Contrato IVA pleno: CD·(1+IVA).
+- El descuento de la cotización todavía no se aplica (se avisa al importar).
 - **El avance físico real sale del Avance diario**, NO de cortes ni de dinero cobrado:
   Σ(min(cant. ejecutada, cant. contratada) × PU venta) / CD base. Lo calcula el trigger de la BD
   (`avance_porcentaje`) y `PCT.avanceFisico()` en el navegador: mantén ambos idénticos.
@@ -65,8 +81,11 @@ siempre qué debe hacer él después (subir a GitHub, correr SQL en Supabase, et
 
 ## Estado y hoja de ruta de Proyectos
 
-Hecho (Fase 1): crear proyecto (admin + importar plantilla), Inicio (parámetros y tarifas de técnicos),
-Presupuesto (tabla madre, filtros, adicionales, importar/exportar), Avance diario, Documentos, Resumen.
+Hecho (Fase 1): crear proyecto (admin + importar la cotización de Pctronic o la plantilla v7, escoger
+esquema AIU / IVA pleno, descargar plantilla de cotización), Inicio (parámetros y tarifas de técnicos),
+Cotización (ítems con referencia, marca, tiempo de entrega, observaciones; adicionales; importar/exportar),
+Presupuesto de costos (costos por ítem, margen, exportar/importar costos cruzando por # + descripción),
+Avance diario (con bitácora diaria: tabla `avance_registros`), Documentos, Resumen.
 
 Pendiente, en este orden:
 
@@ -78,8 +97,7 @@ Pendiente, en este orden:
 4. **Fase 5** — migrar el Panel Principal, `compras.html` y `facturacion.html` a las tablas nuevas
    (hoy leen tablas heredadas: `compras`, `facturas`, `proyecto_contratistas`/`cortes_pago`).
 
-Pendientes sueltos: el login se quedaba en "Entrando..." (probable `config.js` con valores de relleno);
-las pestañas Cortes/Mano de obra/Gastos/Materiales/Cronograma aparecen como "Próximamente".
+Pendientes sueltos: las pestañas Cortes/Mano de obra/Gastos/Materiales/Cronograma aparecen como "Próximamente".
 
 ## Cómo trabajar con Jose
 

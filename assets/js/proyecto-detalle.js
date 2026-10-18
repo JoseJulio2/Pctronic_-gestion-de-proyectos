@@ -27,7 +27,8 @@
   const TABS = [
     { id: "resumen", label: "Resumen", listo: true },
     { id: "inicio", label: "Inicio", listo: true },
-    { id: "presupuesto", label: "Presupuesto", listo: true },
+    { id: "cotizacion", label: "Cotización", listo: true },
+    { id: "costos", label: "Presupuesto de costos", listo: true },
     { id: "avance", label: "Avance diario", listo: true },
     { id: "cronograma", label: "Cronograma", listo: false, fase: "Fase 4" },
     { id: "cortes", label: "Cortes cliente", listo: false, fase: "Fase 2" },
@@ -105,7 +106,7 @@
               ${fila("Comercial", escapeHtml(p.comercial_responsable || ""))}
               ${fila("Contratista de mano de obra", escapeHtml(p.contratista?.nombre || "Personal propio"))}
               ${fila("Tipo de proyecto", escapeHtml((p.tipo_proyecto || []).join(", ")))}
-              ${fila("Tipo de contrato", p.tipo_contrato === "aiu" ? `AIU (A ${p.administracion_porcentaje}% · I ${p.imprevistos_porcentaje}% · U ${p.utilidad_porcentaje}%)` : "IVA simple")}
+              ${fila("Tipo de contrato", p.tipo_contrato === "aiu" ? `AIU (A ${p.administracion_porcentaje}% · I ${p.imprevistos_porcentaje}% · U ${p.utilidad_porcentaje}%)` : "IVA pleno")}
             </dl>
           </div>
           <div class="rounded-xl border border-gray-200 bg-white p-5">
@@ -121,7 +122,7 @@
       <div class="mx-auto max-w-md rounded-xl border border-dashed border-gray-300 bg-white p-10 text-center">
         <span class="material-symbols-outlined text-[40px] text-gray-300">construction</span>
         <h3 class="mt-2 text-base font-bold text-gray-900">${escapeHtml(tab.label)}</h3>
-        <p class="mt-1 text-sm text-gray-500">Esta pestaña se construye en la <b>${tab.fase}</b> del rediseño de Proyectos. Mientras tanto, el Presupuesto y el Avance diario ya quedan listos para alimentarla.</p>
+        <p class="mt-1 text-sm text-gray-500">Esta pestaña se construye en la <b>${tab.fase}</b> del rediseño de Proyectos. Mientras tanto, la Cotización y el Avance diario ya quedan listos para alimentarla.</p>
       </div>`;
   };
 
@@ -137,6 +138,7 @@
   };
 
   const activarTab = async (id) => {
+    if (id === "presupuesto") id = "cotizacion"; // enlaces viejos
     const tab = TABS.find((t) => t.id === id) || TABS[0];
     tabActiva = tab.id;
     const url = new URL(window.location.href);
@@ -154,7 +156,8 @@
       if (!tab.listo) return renderProximamente(root, tab);
       if (tab.id === "resumen") return renderResumen(root);
       if (tab.id === "inicio") return PCT.renderInicio(root);
-      if (tab.id === "presupuesto") return PCT.renderPresupuesto(root);
+      if (tab.id === "cotizacion") return PCT.renderCotizacion(root);
+      if (tab.id === "costos") return PCT.renderCostos(root);
       if (tab.id === "avance") return await PCT.renderAvance(root);
       if (tab.id === "documentos") return await PCT.renderDocumentos(root);
     } catch (err) {
