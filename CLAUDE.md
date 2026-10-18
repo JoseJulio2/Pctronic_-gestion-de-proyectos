@@ -41,6 +41,11 @@ siempre qué debe hacer él después (subir a GitHub, correr SQL en Supabase, et
   mismo subtotal: "TOTAL OFERTA SUMINISTROS" (IVA pleno) y "TOTAL OFERTA AIU INSTALACION" (A, I, U, IVA sobre U).
   Trae solo precios de venta, no costos. Al importarla en Nuevo proyecto se pregunta con cuál oferta aceptó el
   cliente (`tipo_contrato` = `aiu` | `iva`). Puede traer filas `#REF!`: se ignoran.
+  El cotizador completo (ej. Mapei) trae además, a la derecha de la columna J, columnas internas de costo
+  (Costo, Moneda, Ref Fabricante, Descripcion, **Tipo**, Margen, TRM...): la tabla se corta en la primera
+  columna vacía después de "Descripción" para no mezclarlas. Títulos de sección: uno solo → capítulo; dos
+  seguidos → capítulo + subcapítulo (y los siguientes sueltos, subcapítulos). Si el IVA pleno dice
+  "Incluido", solo hay esquema AIU y no se pregunta.
 - `docs/Plantilla_Cotizacion_Pctronic.xlsx` es **el mismo Excel de cotización de Pctronic, copiado tal cual**
   (logo, colores, fórmulas). El botón "Descargar plantilla" baja ese archivo; no lo generes con SheetJS (la
   versión gratuita no copia formato ni imágenes). Si Jose cambia su formato, reemplaza ese archivo.

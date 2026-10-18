@@ -96,18 +96,30 @@
     ["pu_contratista", (h) => h.includes("contratista") && h.startsWith("pu")],
   ];
 
+  // La tabla termina en la primera celda vacía después de "Descripción": así
+  // las columnas internas que algunas cotizaciones traen a la derecha
+  // (Costo, Moneda, Tipo, Margen...) no se confunden con la tabla.
+  // `mapa._fin` = índice de la última columna de la tabla.
   function mapearEncabezados(fila) {
     const mapa = {};
-    fila.forEach((celda, idx) => {
-      const h = normEnc(celda);
-      if (!h) return;
+    let fin = fila.length - 1;
+    for (let idx = 0; idx < fila.length; idx++) {
+      const h = normEnc(fila[idx]);
+      if (!h) {
+        if (mapa.descripcion !== undefined) {
+          fin = idx - 1;
+          break;
+        }
+        continue;
+      }
       for (const [clave, pred] of COLUMNAS) {
         if (mapa[clave] === undefined && pred(h)) {
           mapa[clave] = idx;
           break;
         }
       }
-    });
+    }
+    Object.defineProperty(mapa, "_fin", { value: fin, enumerable: false });
     return mapa;
   }
 
@@ -176,20 +188,31 @@
     }
 
     const items = [];
+    // Títulos de sección: uno solo → capítulo. Dos seguidos (ej. "SISTEMA DE
+    // DETECCIÓN" y luego "EQUIPOS") → capítulo + subcapítulo, y desde ahí los
+    // títulos sueltos siguen siendo subcapítulos hasta el próximo par.
+    let enSubcapitulos = false;
     for (let r = filaEnc + 1; r < filas.length; r++) {
       const f = filas[r];
       if (esFinDeTabla(f)) break;
       const g = (k) => (mapa[k] === undefined ? "" : f[mapa[k]]);
-      const descripcion = String(g("descripcion") ?? "").trim();
+      const descripcion = String(g("descripcion") ?? "").replace(/\r\n?/g, "\n").trim();
       if (descripcion.startsWith("#")) continue; // #REF!, #N/A... (filas rotas del Excel)
       const cantidad = aNumero(g("cantidad"));
 
-      // Sin columna "Tipo" (formato cotización): una fila con un solo texto y
-      // sin descripción ni cantidad es el título de una sección → capítulo.
+      // Sin columna "Tipo" (formato cotización): una fila con un solo texto
+      // dentro de la tabla y sin descripción ni cantidad es un título de sección.
       if (mapa.tipo === undefined && !descripcion && !cantidad) {
-        const textos = f.map(textoCelda).filter(Boolean);
+        const textos = f.slice(0, mapa._fin + 1).map(textoCelda).filter(Boolean);
         if (textos.length === 1 && !textos[0].startsWith("#")) {
-          items.push({ ...ITEM_VACIO, tipo: "capitulo", descripcion: textos[0] });
+          const anterior = items[items.length - 1];
+          let tipo = enSubcapitulos ? "subcapitulo" : "capitulo";
+          if (anterior && anterior.tipo !== "item") {
+            anterior.tipo = "capitulo";
+            tipo = "subcapitulo";
+            enSubcapitulos = true;
+          }
+          items.push({ ...ITEM_VACIO, tipo, descripcion: textos[0] });
         }
         continue;
       }
@@ -249,10 +272,10 @@
     }
     return null;
   };
-  const valorDerecha = (filas, pos, maxSaltos = 4) => {
+  const valorDerecha = (filas, pos, maxSaltos = 4, maxCol = Infinity) => {
     if (!pos) return null;
     const f = filas[pos.fila];
-    for (let c = pos.col + 1; c <= pos.col + maxSaltos && c < f.length; c++) {
+    for (let c = pos.col + 1; c <= pos.col + maxSaltos && c <= maxCol && c < f.length; c++) {
       if (f[c] !== "" && f[c] !== null && f[c] !== undefined) return f[c];
     }
     return null;
@@ -277,7 +300,8 @@
     if (!filas) return null;
     const enc = filaEncabezado(filas);
     if (!enc || enc.mapa.tipo !== undefined) return null; // la v7 y lo exportado por la app traen "Tipo"
-    const arriba = (pred) => valorDerecha(filas, buscarEtiqueta(filas, pred, 0, enc.fila));
+    // solo dentro del ancho de la tabla (a la derecha puede haber columnas internas: TRM, monedas...)
+    const arriba = (pred) => valorDerecha(filas, buscarEtiqueta(filas, pred, 0, enc.fila), 4, enc.mapa._fin);
     const abajo = (pred) => buscarEtiqueta(filas, pred, enc.fila + 1);
     const texto = (v) => (v === null || v === undefined ? "" : String(v).trim());
 
