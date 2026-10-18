@@ -123,7 +123,12 @@ window.PCT = window.PCT || {};
   PCT.recargarFinanzas = async () => {
     const id = PCT.estado.proyecto.id;
     const [c, g] = await Promise.all([
-      window.sb.from("cortes_cliente_items").select("cantidad, pu_venta_snapshot, corte:cortes_cliente!inner(proyecto_id)").eq("corte.proyecto_id", id),
+      // solo cortes ya facturados o pagados (un corte "pendiente" aún no se ha facturado)
+      window.sb
+        .from("cortes_cliente_items")
+        .select("cantidad, pu_venta_snapshot, corte:cortes_cliente!inner(proyecto_id, estado)")
+        .eq("corte.proyecto_id", id)
+        .in("corte.estado", ["facturado", "pagado"]),
       window.sb.from("gastos").select("valor_total").eq("proyecto_id", id),
     ]);
     if (c.error) throw c.error;
@@ -233,7 +238,7 @@ window.PCT = window.PCT || {};
   // --------------------------------------------------------------------
   // CÁLCULOS · margen bruto actual = facturado − gastado
   // --------------------------------------------------------------------
-  // Facturado = ingreso sin IVA de todos los cortes de cliente (CD del corte
+  // Facturado = ingreso sin IVA de los cortes de cliente facturados o pagados (CD del corte
   // con A+I+U en AIU; el IVA no es ingreso). Gastado = todo lo registrado en
   // Gastos (única fuente del dinero que sale).
   PCT.margenActual = (p = PCT.estado.proyecto, f = PCT.estado.finanzas) => {

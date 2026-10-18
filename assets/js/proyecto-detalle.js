@@ -31,8 +31,8 @@
     { id: "costos", label: "Presupuesto de costos", listo: true },
     { id: "avance", label: "Avance diario", listo: true },
     { id: "cronograma", label: "Cronograma", listo: false, fase: "Fase 4" },
-    { id: "cortes", label: "Cortes cliente", listo: false, fase: "Fase 2" },
-    { id: "mano_obra", label: "Mano de obra", listo: false, fase: "Fase 3" },
+    { id: "cortes", label: "Cortes cliente", listo: true },
+    { id: "mano_obra", label: "Mano de obra", listo: true },
     { id: "gastos", label: "Gastos", listo: false, fase: "Fase 3" },
     { id: "materiales", label: "Materiales", listo: false, fase: "Fase 4" },
     { id: "documentos", label: "Documentos", listo: true },
@@ -168,6 +168,8 @@
       if (tab.id === "cotizacion") return PCT.renderCotizacion(root);
       if (tab.id === "costos") return PCT.renderCostos(root);
       if (tab.id === "avance") return await PCT.renderAvance(root);
+      if (tab.id === "cortes") return await PCT.renderCortes(root);
+      if (tab.id === "mano_obra") return await PCT.renderManoObra(root);
       if (tab.id === "documentos") return await PCT.renderDocumentos(root);
     } catch (err) {
       manejarError(err, "No se pudo abrir la pestaña");

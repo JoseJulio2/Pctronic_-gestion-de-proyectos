@@ -518,6 +518,8 @@ create table public.cortes_mo (
   numero int not null,
   fecha date not null default current_date,
   numero_cuenta_cobro text,
+  contratista_id uuid references public.contratistas(id) on delete set null,
+  retencion_porcentaje numeric(5,2) not null default 0, -- % de retención del contratista al momento del corte
   notas text,
   created_at timestamptz not null default now(),
   unique (proyecto_id, numero)
