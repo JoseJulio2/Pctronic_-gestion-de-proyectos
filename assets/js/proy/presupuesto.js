@@ -533,7 +533,7 @@
             await PCT.recargarEjec();
             pintarTabla();
             await refrescarProyecto();
-            mostrarAviso(`Se importaron ${items.length - caps} ítems y ${caps} capítulos.`, "exito");
+            mostrarAviso(`Se importaron ${items.length - caps} ítems y ${caps} capítulos.${avisos.length ? " " + avisos.join(" ") : ""}`, avisos.length ? "info" : "exito");
           } catch (err) {
             manejarError(err, "No se pudo importar la cotización");
           }

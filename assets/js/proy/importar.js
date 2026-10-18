@@ -192,11 +192,12 @@
     // DETECCIÓN" y luego "EQUIPOS") → capítulo + subcapítulo, y desde ahí los
     // títulos sueltos siguen siendo subcapítulos hasta el próximo par.
     let enSubcapitulos = false;
+    const sinDescripcion = []; // # de los ítems que vinieron sin descripción
     for (let r = filaEnc + 1; r < filas.length; r++) {
       const f = filas[r];
       if (esFinDeTabla(f)) break;
       const g = (k) => (mapa[k] === undefined ? "" : f[mapa[k]]);
-      const descripcion = String(g("descripcion") ?? "").replace(/\r\n?/g, "\n").trim();
+      let descripcion = String(g("descripcion") ?? "").replace(/\r\n?/g, "\n").trim();
       if (descripcion.startsWith("#")) continue; // #REF!, #N/A... (filas rotas del Excel)
       const cantidad = aNumero(g("cantidad"));
 
@@ -215,6 +216,15 @@
           items.push({ ...ITEM_VACIO, tipo, descripcion: textos[0] });
         }
         continue;
+      }
+
+      // Ítem con cantidad pero sin descripción: se importa igual (si no, el
+      // total quedaría corto) con un nombre provisional, y se avisa.
+      if (!descripcion && cantidad > 0) {
+        const codigo = String(g("codigo") ?? "").trim();
+        const referencia = String(g("referencia") ?? "").trim();
+        descripcion = `${referencia || (codigo ? "Ítem " + codigo : "Ítem")} (sin descripción)`;
+        sinDescripcion.push(codigo || `fila ${r + 1}`);
       }
 
       const tipo = TIPO_FILA(g("tipo"), cantidad > 0);
@@ -251,6 +261,11 @@
       });
     }
     if (!items.some((i) => i.tipo === "item")) avisos.push("La hoja no tiene ítems todavía.");
+    if (sinDescripcion.length) {
+      avisos.push(
+        `${sinDescripcion.length} ítem(s) venían sin descripción (${sinDescripcion.join(", ")}): se importaron con un nombre provisional. Ponles la descripción en la pestaña Cotización.`
+      );
+    }
     if (puContratistaPorFila) avisos.push("Se leyeron también los precios del contratista de la hoja MANO DE OBRA.");
     return { items, hoja: hojaNombre, avisos };
   };
