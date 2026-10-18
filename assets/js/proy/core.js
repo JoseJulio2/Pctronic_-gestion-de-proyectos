@@ -130,12 +130,17 @@ window.PCT = window.PCT || {};
   // --------------------------------------------------------------------
   // Costos de un ítem. Material con IVA solo si el proyecto lo indica
   // (en AIU el IVA de las compras es costo).
+  // El Presupuesto de costos maneja SOLO material/equipos (decisión de Jose,
+  // oct. 2026): la mano de obra se presupuesta en la Fase 3 (pestaña Mano de
+  // obra) y transporte/alquiler salen de Gastos. Por eso el costo total del
+  // ítem es solo el material; los campos cu_mano_obra, cu_transporte y
+  // cu_alquiler siguen en la BD pero ya no se usan aquí.
   PCT.calcItem = (i, p = PCT.estado.proyecto) => {
     if (!i || i.tipo !== "item") return null;
     const q = PCT.num(i.cantidad);
     const ivaMat = p?.iva_materiales ? 1 + PCT.num(p.iva_porcentaje) / 100 : 1;
     const cuMatIva = PCT.num(i.cu_material) * ivaMat;
-    const cuTotal = cuMatIva + PCT.num(i.cu_mano_obra) + PCT.num(i.cu_transporte) + PCT.num(i.cu_alquiler);
+    const cuTotal = cuMatIva;
     const totalVenta = q * PCT.num(i.pu_venta);
     const costoTotal = q * cuTotal;
     const margen = totalVenta - costoTotal;

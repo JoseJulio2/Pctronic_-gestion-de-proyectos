@@ -87,7 +87,7 @@
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
           ${kpi("Valor del contrato", formatoMoneda(c.total), `Ingreso sin IVA ${formatoMoneda(c.ingreso)}`)}
           ${kpi("Avance físico real", PCT.fmtPct(av.pct), "Desde el avance diario")}
-          ${kpi("Costo presupuestado", formatoMoneda(base.costo), `${base.n} ítems`)}
+          ${kpi("Costo presupuestado", formatoMoneda(base.costo), `Materiales y equipos · ${base.n} ítems`)}
           ${kpi("Margen bruto presupuestado", formatoMoneda(margenPpto), c.ingreso ? PCT.fmtPct(margenPpto / c.ingreso) + " del ingreso" : "")}
           ${kpi("Anticipo", formatoMoneda(c.anticipo), `${p.anticipo_porcentaje}% pactado · recibido ${formatoMoneda(p.anticipo_recibido)}`)}
         </div>

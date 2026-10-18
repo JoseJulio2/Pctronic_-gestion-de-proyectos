@@ -267,7 +267,7 @@
       );
     }
     if (puContratistaPorFila) avisos.push("Se leyeron también los precios del contratista de la hoja MANO DE OBRA.");
-    return { items, hoja: hojaNombre, avisos };
+    return { items, hoja: hojaNombre, avisos, columnas: Object.keys(mapa) };
   };
 
   // --------------------------------------------------------------------
@@ -390,6 +390,394 @@
     document.body.appendChild(a);
     a.click();
     a.remove();
+  };
+
+  // --------------------------------------------------------------------
+  // EXPORTAR con la plantilla de cotización (conserva logo, colores y fórmulas)
+  // --------------------------------------------------------------------
+  // SheetJS (la versión gratuita) no conserva formato ni imágenes, así que para
+  // escribir sobre la plantilla se usa ExcelJS, que se carga por CDN solo
+  // cuando hace falta.
+  const cargas = {};
+  const cargarScript = (global, src) => {
+    if (window[global]) return Promise.resolve();
+    if (!cargas[src]) {
+      cargas[src] = new Promise((ok, mal) => {
+        const s = document.createElement("script");
+        s.src = src;
+        s.onload = ok;
+        s.onerror = () => {
+          delete cargas[src];
+          mal(new Error("No se pudo cargar la herramienta de Excel. Revisa la conexión a internet."));
+        };
+        document.head.appendChild(s);
+      });
+    }
+    return cargas[src];
+  };
+  // ExcelJS escribe sobre la plantilla; JSZip retoca el archivo final (logo).
+  PCT.cargarExcelJS = () =>
+    Promise.all([
+      cargarScript("ExcelJS", "https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"),
+      cargarScript("JSZip", "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"),
+    ]);
+
+  // Llena la plantilla con el proyecto y sus ítems y la descarga.
+  // conCostos: agrega a la derecha C.U. material, costo total y margen
+  // (es la plantilla del Presupuesto de costos; se vuelve a importar igual).
+  PCT.exportarCotizacionExcel = async (p, items, { conCostos = false } = {}) => {
+    await PCT.cargarExcelJS();
+    const resp = await fetch(PCT.ARCHIVO_PLANTILLA_COTIZACION, { cache: "no-cache" });
+    if (!resp.ok) throw new Error("No se encontró la plantilla de cotización.");
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await resp.arrayBuffer());
+    const ws = wb.worksheets[0];
+    ws.name = "Cotizador";
+    const MAX_COL = 15;
+
+    const textoDe = (cell) => {
+      const v = cell.value;
+      if (v && typeof v === "object") {
+        if (v.richText) return v.richText.map((t) => t.text).join("");
+        return String(v.result ?? v.text ?? "");
+      }
+      return String(v ?? "");
+    };
+    const etiqueta = (cell) => normEnc(textoDe(cell)).replace(/[:.]+$/, "").trim();
+    const letra = (n) => ws.getColumn(n).letter;
+    const clonar = (o) => JSON.parse(JSON.stringify(o || {}));
+
+    // Fila de encabezados de la tabla y columnas por nombre
+    let filaEnc = null;
+    const col = {};
+    for (let r = 1; r <= 60 && !filaEnc; r++) {
+      const fila = Array.from({ length: MAX_COL }, (_, i) => textoDe(ws.getRow(r).getCell(i + 1)));
+      const m = mapearEncabezados(fila);
+      if (m.descripcion !== undefined && m.cantidad !== undefined) {
+        filaEnc = r;
+        Object.entries(m).forEach(([k, i]) => (col[k] = i + 1));
+        col.subtotal = fila.findIndex((h) => normEnc(h).startsWith("subtotal")) + 1;
+        col.ultima = m._fin + 1;
+      }
+    }
+    if (!filaEnc || !col.subtotal) throw new Error("La plantilla no tiene la tabla de ítems esperada.");
+
+    const buscarFinTabla = () => {
+      for (let r = filaEnc + 1; r <= ws.rowCount; r++) {
+        const fila = Array.from({ length: MAX_COL }, (_, i) => textoDe(ws.getRow(r).getCell(i + 1)));
+        if (esFinDeTabla(fila)) return r;
+      }
+      return ws.rowCount + 1;
+    };
+    let filaTot = buscarFinTabla();
+
+    // Estilos de muestra: primera fila de sección y primera fila de ítem
+    let filaSec = null;
+    let filaItem = null;
+    // (en una fila combinada todas las celdas devuelven el texto de la primera,
+    //  así que la sección se reconoce porque no tiene cantidad numérica)
+    for (let r = filaEnc + 1; r < filaTot; r++) {
+      const row = ws.getRow(r);
+      const desc = textoDe(row.getCell(col.descripcion)).trim();
+      const cant = row.getCell(col.cantidad).value;
+      if (!filaItem && desc && typeof cant === "number") filaItem = r;
+      if (!filaSec && typeof row.getCell(1).value === "string" && row.getCell(1).value.trim() && typeof cant !== "number") filaSec = r;
+    }
+    filaItem = filaItem || filaEnc + 2;
+    filaSec = filaSec || filaItem;
+    const estilos = (r) => Array.from({ length: MAX_COL }, (_, i) => clonar(ws.getRow(r).getCell(i + 1).style));
+    const estiloItem = estilos(filaItem);
+    const estiloSec = estilos(filaSec);
+    const estiloEnc = estilos(filaEnc);
+    const altoSec = ws.getRow(filaSec).height;
+
+    // Quitar las celdas combinadas del área de ítems (se vuelven a combinar las secciones)
+    Object.values(ws._merges).forEach((m) => {
+      if (m.top > filaEnc && m.top < filaTot) ws.unMergeCells(m.top, m.left, m.bottom, m.right);
+    });
+
+    // Si no caben, se insertan filas antes de los totales
+    const filasItems = items.length;
+    const espacio = filaTot - filaEnc - 1;
+    if (filasItems > espacio) {
+      // ExcelJS corre las filas pero no las celdas combinadas ni las
+      // referencias de las fórmulas: eso se corre aquí a mano.
+      const delta = filasItems - espacio;
+      const viejoTot = filaTot;
+      const abajo = Object.values(ws._merges)
+        .filter((m) => m.top >= viejoTot)
+        .map((m) => ({ top: m.top, left: m.left, bottom: m.bottom, right: m.right }));
+      abajo.forEach((m) => ws.unMergeCells(m.top, m.left, m.bottom, m.right));
+      ws.spliceRows(viejoTot, 0, ...Array.from({ length: delta }, () => []));
+      abajo.forEach((m) => ws.mergeCells(m.top + delta, m.left, m.bottom + delta, m.right));
+      for (let r = viejoTot + delta; r <= ws.rowCount; r++) {
+        ws.getRow(r).eachCell((cell) => {
+          const v = cell.value;
+          if (v && typeof v === "object" && typeof v.formula === "string") {
+            cell.value = { formula: v.formula.replace(/(\$?[A-Z]{1,3}\$?)(\d+)/g, (m, c, n) => (+n >= viejoTot ? c + (+n + delta) : m)) };
+          }
+        });
+      }
+      filaTot = buscarFinTabla();
+    }
+    const primera = filaEnc + 1;
+    const ultima = filaTot - 1;
+
+    // Columnas de costo (solo en la plantilla de costos)
+    const ivaMat = p.iva_materiales ? 1 + PCT.num(p.iva_porcentaje) / 100 : 1;
+    const cc = conCostos
+      ? { cu: col.ultima + 1, cuIva: col.ultima + 2, costo: col.ultima + 3, margen: col.ultima + 4, margenPct: col.ultima + 5 }
+      : null;
+    const ultimaCol = cc ? cc.margenPct : col.ultima;
+    const fmtMoneda = estiloItem[col.pu_venta - 1]?.numFmt || "#,##0";
+
+    // Escribir filas
+    for (let r = primera; r <= ultima; r++) {
+      const row = ws.getRow(r);
+      const it = items[r - primera];
+      for (let c = 1; c <= ultimaCol; c++) {
+        const cell = row.getCell(c);
+        cell.value = null;
+        const base = it && it.tipo !== "item" ? estiloSec : estiloItem;
+        cell.style = clonar(base[Math.min(c, col.ultima) - 1]);
+      }
+      row.height = undefined;
+      if (!it) continue;
+
+      if (it.tipo !== "item") {
+        row.getCell(1).value = it.descripcion;
+        ws.mergeCells(r, 1, r, col.ultima);
+        if (altoSec) row.height = altoSec;
+        continue;
+      }
+
+      const q = PCT.num(it.cantidad);
+      const pu = PCT.num(it.pu_venta);
+      const L = (k) => `${letra(k)}${r}`;
+      const poner = (k, v) => {
+        if (col[k]) row.getCell(col[k]).value = v === "" || v === undefined ? null : v;
+      };
+      const codigo = String(it.codigo ?? "").trim();
+      poner("codigo", /^\d+$/.test(codigo) ? Number(codigo) : codigo || null);
+      poner("referencia", it.referencia || null);
+      poner("descripcion", it.descripcion);
+      poner("cantidad", q);
+      poner("unidad", it.unidad || null);
+      poner("tiempo_entrega", it.tiempo_entrega || null);
+      poner("marca", it.marca || null);
+      poner("pu_venta", pu);
+      poner("observaciones", [it.es_adicional ? "ADICIONAL" : "", it.observaciones || ""].filter(Boolean).join(" · ") || null);
+      row.getCell(col.subtotal).value = { formula: `${L(col.cantidad)}*${L(col.pu_venta)}`, result: q * pu };
+
+      if (cc) {
+        const cu = PCT.num(it.cu_material);
+        const cuIva = cu * ivaMat;
+        row.getCell(cc.cu).value = cu;
+        row.getCell(cc.cuIva).value = { formula: `${L(cc.cu)}*${ivaMat}`, result: cuIva };
+        row.getCell(cc.costo).value = { formula: `${L(col.cantidad)}*${L(cc.cuIva)}`, result: q * cuIva };
+        row.getCell(cc.margen).value = { formula: `${L(col.subtotal)}-${L(cc.costo)}`, result: q * pu - q * cuIva };
+        row.getCell(cc.margenPct).value = {
+          formula: `IF(${L(col.subtotal)}=0,"",${L(cc.margen)}/${L(col.subtotal)})`,
+          result: q * pu ? (q * pu - q * cuIva) / (q * pu) : "",
+        };
+        [cc.cu, cc.cuIva, cc.costo, cc.margen].forEach((k) => (row.getCell(k).numFmt = fmtMoneda));
+        row.getCell(cc.margenPct).numFmt = "0.0%";
+      }
+
+      // Alto según el largo de la descripción (Excel no lo ajusta solo)
+      const ancho = Math.max(ws.getColumn(col.descripcion).width || 40, 10);
+      const lineas = String(it.descripcion)
+        .split("\n")
+        .reduce((n, linea) => n + Math.max(1, Math.ceil(linea.length / (ancho * 1.1))), 0);
+      if (lineas > 1) row.height = Math.min(409, 14 * lineas + 2);
+    }
+
+    // Encabezados de las columnas de costo y colores del margen
+    if (cc) {
+      const titulos = { cu: "C.U. material (sin IVA)", cuIva: "C.U. material (con IVA)", costo: "Costo total", margen: "Margen $", margenPct: "Margen %" };
+      Object.entries(titulos).forEach(([k, t]) => {
+        const cell = ws.getRow(filaEnc).getCell(cc[k]);
+        cell.value = t;
+        cell.style = clonar(estiloEnc[col.ultima - 1]);
+        ws.getColumn(cc[k]).width = 16;
+      });
+      const rango = `${letra(cc.margen)}${primera}:${letra(cc.margenPct)}${ultima}`;
+      ws.addConditionalFormatting({
+        ref: rango,
+        rules: [
+          { type: "cellIs", operator: "greaterThan", formulae: ["0"], priority: 1, style: { font: { color: { argb: "FF16A34A" } } } },
+          { type: "cellIs", operator: "lessThan", formulae: ["0"], priority: 2, style: { font: { color: { argb: "FFDC2626" } } } },
+        ],
+      });
+    }
+
+    // Totales: las sumas cubren toda el área de ítems; % de AIU e IVA del proyecto
+    const subtotal = items.filter((i) => i.tipo === "item").reduce((s, i) => s + PCT.num(i.cantidad) * PCT.num(i.pu_venta), 0);
+    const L_SUB = letra(col.subtotal);
+    const reSuma = new RegExp(`SUM\\(${L_SUB}\\d+:${L_SUB}\\d+\\)`, "i");
+    const fraccion = (v) => PCT.num(v) / 100;
+    const porEtiqueta = {
+      administracion: fraccion(p.administracion_porcentaje),
+      imprevistos: fraccion(p.imprevistos_porcentaje),
+      utilidad: fraccion(p.utilidad_porcentaje),
+      "iva sobre utilidad": fraccion(p.iva_porcentaje),
+      iva: fraccion(p.iva_porcentaje),
+    };
+    for (let r = filaTot; r <= Math.min(ws.rowCount, filaTot + 60); r++) {
+      const row = ws.getRow(r);
+      let pctCelda = null;
+      for (let c = 1; c <= MAX_COL; c++) {
+        const cell = row.getCell(c);
+        const v = cell.value;
+        if (v && typeof v === "object" && typeof v.formula === "string" && reSuma.test(v.formula)) {
+          cell.value = { formula: v.formula.replace(reSuma, `SUM(${L_SUB}${primera}:${L_SUB}${ultima})`), result: subtotal };
+        }
+        const e = etiqueta(cell);
+        const clave = Object.keys(porEtiqueta).find((k) => (k === "iva" ? e === "iva" : e.startsWith(k)));
+        if (clave && !pctCelda) {
+          // la celda del % es la primera a la derecha con un número entre 0 y 1
+          for (let d = c + 1; d <= MAX_COL; d++) {
+            const x = row.getCell(d);
+            if (typeof x.value === "number" && x.value > 0 && x.value < 1) {
+              x.value = porEtiqueta[clave];
+              pctCelda = x;
+              break;
+            }
+          }
+        }
+      }
+      // "J152*19%" → que use la celda del %
+      if (pctCelda) {
+        row.eachCell((cell) => {
+          const v = cell.value;
+          if (v && typeof v === "object" && typeof v.formula === "string" && /\d+(\.\d+)?%/.test(v.formula)) {
+            cell.value = { formula: v.formula.replace(/\d+(\.\d+)?%/, pctCelda.address) };
+          }
+        });
+      }
+    }
+
+    // Encabezado de la cotización
+    const ponerJunto = (pred, valor, desde = 1, hasta = filaEnc - 1) => {
+      for (let r = desde; r <= hasta; r++) {
+        for (let c = 1; c < MAX_COL; c++) {
+          if (pred(etiqueta(ws.getRow(r).getCell(c)))) {
+            ws.getRow(r).getCell(c + 1).value = valor;
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+    ponerJunto((l) => l === "referencia", p.numero_cotizacion || null);
+    ponerJunto((l) => l === "descripcion", p.nombre || null);
+    if (p.fecha_cotizacion) ponerJunto((l) => l === "fecha", new Date(`${p.fecha_cotizacion}T00:00:00Z`)); // ExcelJS toma las fechas en UTC
+    ponerJunto((l) => l === "cliente", p.clientes?.nombre || null);
+    ponerJunto((l) => l === "ciudad", p.ciudad || null);
+    ["atencion", "correo", "telefono"].forEach((k) => ponerJunto((l) => l === k, null));
+    // Condiciones comerciales (abajo)
+    const deNotas = (t) => (String(p.notas || "").match(new RegExp(`^${t}:\\s*(.+)$`, "mi")) || [])[1] || null;
+    const abajo = { desde: filaTot, hasta: ws.rowCount };
+    if (p.comercial_responsable) ponerJunto((l) => l === "nombre", p.comercial_responsable, abajo.desde, abajo.hasta);
+    if (deNotas("Preventa")) ponerJunto((l) => l === "preventa", deNotas("Preventa"), abajo.desde, abajo.hasta);
+    if (deNotas("Forma de pago")) ponerJunto((l) => l === "forma de pago", deNotas("Forma de pago"), abajo.desde, abajo.hasta);
+
+    // Resultados de las fórmulas del encabezado y de los totales, para que el
+    // archivo se vea bien incluso donde no se recalcula (vista previa del
+    // celular o del correo). Excel igual recalcula todo al abrir.
+    const numCol = (letras) => ws.getColumn(letras).number;
+    const serialExcel = (d) => (d.getTime() - Date.UTC(1899, 11, 30)) / 86400000;
+    const crudo = (addr) => {
+      const v = ws.getCell(addr).value;
+      if (v && typeof v === "object" && !(v instanceof Date)) return v.result ?? (v.richText ? textoDe(ws.getCell(addr)) : null);
+      return v;
+    };
+    const numero = (addr) => {
+      const v = crudo(addr);
+      if (v instanceof Date) return serialExcel(v);
+      return typeof v === "number" ? v : 0;
+    };
+    const evaluar = (formula) => {
+      const f0 = formula.replace(/\$/g, "").trim();
+      // referencias fuera de la tabla (columnas internas) → sin resultado
+      const refs = f0.match(/\b[A-Z]{1,3}\d+\b/g) || [];
+      if (refs.some((x) => numCol(x.replace(/\d+/, "")) > ultimaCol)) return undefined;
+      if (/^[A-Z]{1,3}\d+$/.test(f0)) return crudo(f0) ?? undefined; // =D4
+      const upper = f0.match(/^UPPER\((.*)\)$/i);
+      if (upper) {
+        return upper[1]
+          .split("&")
+          .map((t) => t.trim())
+          .map((t) => (/^".*"$/.test(t) ? t.slice(1, -1) : String(crudo(t) ?? "")))
+          .join("")
+          .toUpperCase();
+      }
+      if (/^TODAY\(\)$/i.test(f0)) {
+        const h = new Date();
+        return serialExcel(new Date(Date.UTC(h.getFullYear(), h.getMonth(), h.getDate())));
+      }
+      let f = f0.replace(/SUM\(([A-Z]{1,3})(\d+):([A-Z]{1,3})(\d+)\)/gi, (_, c1, r1, c2, r2) => {
+        let suma = 0;
+        for (let rr = +r1; rr <= +r2; rr++) for (let k = numCol(c1); k <= numCol(c2); k++) suma += numero(`${letra(k)}${rr}`);
+        return `(${suma})`;
+      });
+      f = f.replace(/(\d+(?:\.\d+)?)%/g, (_, n) => `(${n}/100)`);
+      f = f.replace(/\b([A-Z]{1,3}\d+)\b/g, (_, a) => `(${numero(a)})`);
+      if (!/^[\d.+\-*/()\seE]+$/.test(f)) return undefined;
+      try {
+        const x = Function(`"use strict";return (${f});`)();
+        return Number.isFinite(x) ? x : undefined;
+      } catch (e) {
+        return undefined;
+      }
+    };
+    const recalcular = (desde, hasta) => {
+      for (let r = desde; r <= hasta; r++) {
+        ws.getRow(r).eachCell((cell) => {
+          const v = cell.value;
+          if (v && typeof v === "object" && typeof v.formula === "string") {
+            const res = evaluar(v.formula);
+            cell.value = res === undefined ? { formula: v.formula } : { formula: v.formula, result: res };
+          }
+        });
+      }
+    };
+    recalcular(1, filaEnc - 1);
+    recalcular(filaTot, ws.rowCount);
+
+    wb.calcProperties = { ...(wb.calcProperties || {}), fullCalcOnLoad: true };
+
+    let buffer = await wb.xlsx.writeBuffer();
+    // ExcelJS deja el logo con tamaño 0 en <a:xfrm>; Excel lo ignora pero la
+    // vista previa de Mac y otros visores no lo dibujan. Se copia el tamaño real.
+    try {
+      const zip = await JSZip.loadAsync(buffer);
+      const dibujos = Object.keys(zip.files).filter((n) => /^xl\/drawings\/[^/]+\.xml$/.test(n));
+      for (const n of dibujos) {
+        const xml = await zip.file(n).async("string");
+        const arreglado = xml.replace(/<xdr:oneCellAnchor[\s\S]*?<\/xdr:oneCellAnchor>/g, (bloque) => {
+          const colOff = (bloque.match(/<xdr:colOff>(\d+)<\/xdr:colOff>/) || [])[1] || "0";
+          const rowOff = (bloque.match(/<xdr:rowOff>(\d+)<\/xdr:rowOff>/) || [])[1] || "0";
+          const ext = bloque.match(/<xdr:ext cx="(\d+)" cy="(\d+)"\/>/);
+          if (!ext) return bloque;
+          return bloque.replace(/<a:xfrm><a:off x="0" y="0"\/><a:ext cx="0" cy="0"\/><\/a:xfrm>/, `<a:xfrm><a:off x="${colOff}" y="${rowOff}"/><a:ext cx="${ext[1]}" cy="${ext[2]}"/></a:xfrm>`);
+        });
+        if (arreglado !== xml) zip.file(n, arreglado);
+      }
+      buffer = await zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
+    } catch (e) {
+      console.warn("No se pudo ajustar el logo del Excel:", e);
+    }
+    const nombre = `${conCostos ? "Costos" : "Cotizacion"}_${(p.nombre || "proyecto").replace(/[^\w\-]+/g, "_")}.xlsx`;
+    const url = URL.createObjectURL(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = nombre;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    return { nombre, buffer };
   };
 
   // --------------------------------------------------------------------

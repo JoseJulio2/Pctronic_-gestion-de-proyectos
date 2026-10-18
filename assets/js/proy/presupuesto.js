@@ -4,9 +4,11 @@
 //   · Cotización: lo que se le ofreció al cliente (referencia, marca, cantidad,
 //     precio unitario...). De aquí sale el valor del contrato. Aquí se agregan,
 //     mueven y borran filas.
-//   · Presupuesto de costos: los costos internos de cada ítem de la cotización
-//     (material, mano de obra, transporte, alquiler, PU contratista) y el
-//     margen. El cliente nunca ve estas columnas.
+//   · Presupuesto de costos: el costo de material/equipos de cada ítem de la
+//     cotización y el margen. El cliente nunca ve estas columnas. (La mano de
+//     obra va en la Fase 3; transporte y alquiler salen de Gastos.)
+// Importar / exportar usan la plantilla de cotización de Pctronic
+// (docs/Plantilla_Cotizacion_Pctronic.xlsx); la de costos le agrega columnas.
 // Edición directa en la tabla (se guarda al salir de cada celda).
 // ============================================================================
 (function (PCT) {
@@ -27,17 +29,6 @@
     observaciones: { l: "Observaciones", f: "observaciones", t: "text", w: "min-w-[160px]" },
     cu_material: { l: "C.U. material (sin IVA)", f: "cu_material", t: "money", w: "w-28" },
     cu_mat_iva: { l: "C.U. material (con IVA)", calc: (c) => c.cuMatIva, fmt: "money" },
-    tot_material: { l: "Total material", calc: (c) => c.totMaterial, fmt: "money" },
-    cu_mano_obra: { l: "C.U. mano de obra", f: "cu_mano_obra", t: "money", w: "w-28" },
-    tot_mo: { l: "Total mano de obra", calc: (c) => c.totMO, fmt: "money" },
-    pu_contratista: { l: "PU contratista", f: "pu_contratista", t: "money", w: "w-28", nullable: true },
-    tot_contratista: { l: "Total contratista", calc: (c) => c.totContratista, fmt: "money" },
-    ahorro_mo: { l: "Ahorro vs presupuesto", calc: (c) => (c.totContratista === null ? null : c.totMO - c.totContratista), fmt: "money" },
-    cu_transporte: { l: "C.U. transporte / otros", f: "cu_transporte", t: "money", w: "w-28" },
-    tot_transp: { l: "Total transporte", calc: (c) => c.totTransp, fmt: "money" },
-    concepto_alquiler: { l: "Concepto alquiler", f: "concepto_alquiler", t: "text", w: "w-36" },
-    cu_alquiler: { l: "C.U. alquiler", f: "cu_alquiler", t: "money", w: "w-28" },
-    tot_alq: { l: "Total alquiler", calc: (c) => c.totAlq, fmt: "money" },
     costo_total: { l: "Costo total", calc: (c) => c.costoTotal, fmt: "money" },
     margen: { l: "Margen $", calc: (c) => c.margen, fmt: "money" },
     margen_pct: { l: "Margen %", calc: (c) => c.margenPct, fmt: "pct" },
@@ -58,15 +49,11 @@
     },
     costos: {
       vistas: {
-        general: {
-          etiqueta: "General",
-          cols: ["codigo", "descripcion", "unidad", "cantidad", "total_venta", "cu_material", "cu_mat_iva", "cu_mano_obra", "cu_transporte", "concepto_alquiler", "cu_alquiler", "costo_total", "margen", "margen_pct", "pu_contratista"],
+        costos: {
+          etiqueta: "Costos",
+          cols: ["codigo", "descripcion", "unidad", "cantidad", "total_venta", "cu_material", "cu_mat_iva", "costo_total", "margen", "margen_pct"],
           resumen: "costo_total",
         },
-        material: { etiqueta: "Materiales y equipos", cols: ["codigo", "descripcion", "unidad", "cantidad", "cu_material", "cu_mat_iva", "tot_material"], resumen: "tot_material" },
-        mo: { etiqueta: "Mano de obra", cols: ["codigo", "descripcion", "unidad", "cantidad", "cu_mano_obra", "tot_mo", "pu_contratista", "tot_contratista", "ahorro_mo"], resumen: "tot_mo" },
-        transporte: { etiqueta: "Transporte y otros", cols: ["codigo", "descripcion", "unidad", "cantidad", "cu_transporte", "tot_transp"], resumen: "tot_transp" },
-        alquiler: { etiqueta: "Alquileres", cols: ["codigo", "descripcion", "unidad", "cantidad", "concepto_alquiler", "cu_alquiler", "tot_alq"], resumen: "tot_alq" },
       },
       editaFilas: false,
       // lo que viene de la cotización se cambia en la pestaña Cotización
@@ -82,9 +69,6 @@
     return fmt === "pct" ? PCT.fmtPct(valor) : formatoMoneda(valor);
   };
 
-  // Columnas de costo que se exportan / importan en el Presupuesto de costos
-  const ENC_COSTOS = ["#", "Descripción", "Und", "Cant.", "PU venta", "C.U. material (sin IVA)", "C.U. mano de obra", "C.U. transporte / otros", "Concepto alquiler", "C.U. alquiler", "PU contratista"];
-
   PCT.renderCotizacion = (root) => renderTabla(root, "cotizacion");
   PCT.renderCostos = (root) => renderTabla(root, "costos");
 
@@ -99,7 +83,7 @@
         ? `<button type="button" id="pres-plantilla" class="${btnBarra}"><span class="material-symbols-outlined text-[16px]">download</span> Plantilla</button>
            <label class="${btnBarra} cursor-pointer"><span class="material-symbols-outlined text-[16px]">upload</span> Importar cotización<input type="file" id="pres-importar" accept=".xlsx,.xls" class="hidden" /></label>
            <button type="button" id="pres-exportar" class="${btnBarra}"><span class="material-symbols-outlined text-[16px]">table_view</span> Exportar</button>`
-        : `<button type="button" id="pres-exportar" class="${btnBarra}"><span class="material-symbols-outlined text-[16px]">table_view</span> Exportar costos</button>
+        : `<button type="button" id="pres-exportar" class="${btnBarra}"><span class="material-symbols-outlined text-[16px]">table_view</span> Exportar costos (plantilla)</button>
            <label class="${btnBarra} cursor-pointer"><span class="material-symbols-outlined text-[16px]">upload</span> Importar costos<input type="file" id="pres-importar" accept=".xlsx,.xls" class="hidden" /></label>`;
 
     const barraFilas = M.editaFilas
@@ -110,7 +94,7 @@
           <button type="button" data-nuevo="adicional" class="rounded-lg bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-200">+ Ítem adicional</button>
           <span class="text-xs text-gray-400">Los adicionales salen en obra y no estaban en el contrato: se avanzan y se cortan como cualquier ítem, pero no cambian el valor base del contrato.</span>
         </div>`
-      : `<p class="text-xs text-gray-500">Los costos internos de cada ítem de la Cotización. El cliente no ve esta información. Para agregar o quitar ítems, o cambiar cantidades y precios de venta, ve a la pestaña <b>Cotización</b>.</p>`;
+      : `<p class="text-xs text-gray-500">El costo de material y equipos de cada ítem de la Cotización (la mano de obra va en la Fase 3). El cliente no ve esta información. Para agregar o quitar ítems, o cambiar cantidades y precios de venta, ve a la pestaña <b>Cotización</b>. Para llenar los costos en Excel: <b>Exportar costos</b>, llena la columna «C.U. material» y vuelve a <b>Importar costos</b>.</p>`;
 
     root.innerHTML = `
       <div class="space-y-4">
@@ -163,11 +147,12 @@
           tarjeta("Adicionales", formatoMoneda(adic.venta), `${adic.n} ítems fuera de contrato`);
       } else {
         const sinCosto = PCT.estado.items.filter((i) => i.tipo === "item" && !i.es_adicional && PCT.calcItem(i, p).costoTotal === 0).length;
+        const colorMargen = base.margen > 0 ? "text-green-600" : base.margen < 0 ? "text-red-600" : "";
         html =
           tarjeta("Venta (costo directo)", formatoMoneda(base.venta), `${base.n} ítems de la cotización`) +
-          tarjeta("Costo presupuestado", formatoMoneda(base.costo), `Mat. ${formatoMoneda(base.material)}`) +
-          tarjeta("Margen bruto", formatoMoneda(base.margen), base.venta ? PCT.fmtPct(base.margen / base.venta) + " sobre la venta" : "") +
-          tarjeta("Mano de obra", formatoMoneda(base.mo), `Transp. ${formatoMoneda(base.transp)} · Alq. ${formatoMoneda(base.alq)}`) +
+          tarjeta("Costo presupuestado", formatoMoneda(base.costo), "Materiales y equipos") +
+          tarjeta("Margen bruto", `<span class="${colorMargen}">${formatoMoneda(base.margen)}</span>`, "Venta − costo") +
+          tarjeta("Margen %", `<span class="${colorMargen}">${base.venta ? PCT.fmtPct(base.margen / base.venta) : "—"}</span>`, "Sobre la venta") +
           tarjeta("Ítems sin costo", String(sinCosto), sinCosto ? "Faltan costos por llenar" : "Todos tienen costo");
       }
       root.querySelector("#pres-kpis").innerHTML = html;
@@ -177,6 +162,8 @@
     // Vistas (chips)
     // ------------------------------------------------------------------
     const pintarVistas = () => {
+      // con una sola vista no hace falta mostrar los botones
+      if (Object.keys(VISTAS).length < 2) return (root.querySelector("#pres-vistas").innerHTML = "");
       root.querySelector("#pres-vistas").innerHTML = Object.entries(VISTAS)
         .map(
           ([k, v]) =>
@@ -302,8 +289,9 @@
           const col = COL[td.dataset.calc];
           const num = col.calc(c);
           td.textContent = fmtCalc(num, col.fmt);
-          if (["margen", "margen_pct", "ahorro_mo"].includes(td.dataset.calc)) {
+          if (["margen", "margen_pct"].includes(td.dataset.calc)) {
             td.classList.toggle("text-red-600", typeof num === "number" && num < 0);
+            td.classList.toggle("text-green-600", typeof num === "number" && num > 0);
           }
         });
       });
@@ -342,7 +330,7 @@
       PCT.emit("proyecto");
     };
 
-    const CAMPOS_TEXTO_OPCIONAL = ["codigo", "referencia", "marca", "tiempo_entrega", "observaciones", "concepto_alquiler"];
+    const CAMPOS_TEXTO_OPCIONAL = ["codigo", "referencia", "marca", "tiempo_entrega", "observaciones"];
 
     tbody.addEventListener("change", async (e) => {
       const inp = e.target;
@@ -478,30 +466,23 @@
     });
 
     // ------------------------------------------------------------------
-    // Excel
+    // Excel: siempre con la plantilla de cotización de Pctronic
     // ------------------------------------------------------------------
-    const nombreArchivo = (prefijo) => `${prefijo}_${(PCT.estado.proyecto.nombre || "proyecto").replace(/[^\w\-]+/g, "_")}.xlsx`;
-    const guardarHoja = (datos, hojaNombre, archivo) => {
-      const libro = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(libro, XLSX.utils.aoa_to_sheet(datos), hojaNombre);
-      XLSX.writeFile(libro, archivo);
+    const exportar = async (conCostos) => {
+      const btn = root.querySelector("#pres-exportar");
+      btn.disabled = true;
+      try {
+        await PCT.exportarCotizacionExcel(PCT.estado.proyecto, PCT.estado.items, { conCostos });
+      } catch (err) {
+        manejarError(err, "No se pudo exportar");
+      } finally {
+        btn.disabled = false;
+      }
     };
 
     if (modo === "cotizacion") {
       root.querySelector("#pres-plantilla").addEventListener("click", () => PCT.descargarPlantillaCotizacion());
-
-      root.querySelector("#pres-exportar").addEventListener("click", () => {
-        const p = PCT.estado.proyecto;
-        const enc = ["Tipo", "#", "Referencia", "Descripción", "Cant.", "Unidad", "Tiempo de entrega", "Marca", "Precio unitario", "Subtotal", "Observaciones"];
-        const filas = PCT.estado.items.map((i) => {
-          if (i.tipo !== "item") return [i.tipo === "capitulo" ? "Capítulo" : "Subcapítulo", i.codigo || "", "", i.descripcion];
-          return [
-            i.es_adicional ? "Ítem (adicional)" : "Ítem", i.codigo || "", i.referencia || "", i.descripcion, PCT.num(i.cantidad), i.unidad || "",
-            i.tiempo_entrega || "", i.marca || "", PCT.num(i.pu_venta), PCT.calcItem(i, p).totalVenta, i.observaciones || "",
-          ];
-        });
-        guardarHoja([enc, ...filas], "Cotización", nombreArchivo("Cotizacion"));
-      });
+      root.querySelector("#pres-exportar").addEventListener("click", () => exportar(false));
 
       root.querySelector("#pres-importar").addEventListener("change", async (e) => {
         const file = e.target.files[0];
@@ -553,45 +534,41 @@
         });
       });
     } else {
-      // Exportar costos → llenar en Excel → importar costos (se cruzan por # y descripción)
-      root.querySelector("#pres-exportar").addEventListener("click", () => {
-        const filas = PCT.estado.items
-          .filter((i) => i.tipo === "item")
-          .map((i) => [
-            i.codigo || "", i.descripcion, i.unidad || "", PCT.num(i.cantidad), PCT.num(i.pu_venta),
-            PCT.num(i.cu_material), PCT.num(i.cu_mano_obra), PCT.num(i.cu_transporte), i.concepto_alquiler || "", PCT.num(i.cu_alquiler),
-            i.pu_contratista === null ? "" : PCT.num(i.pu_contratista),
-          ]);
-        guardarHoja([ENC_COSTOS, ...filas], "Costos", nombreArchivo("Costos"));
-      });
+      // Exportar costos (la plantilla con los ítems y la columna C.U. material)
+      // → llenar en Excel → importar costos. Se cruzan por # y descripción.
+      root.querySelector("#pres-exportar").addEventListener("click", () => exportar(true));
 
       root.querySelector("#pres-importar").addEventListener("change", async (e) => {
         const file = e.target.files[0];
         e.target.value = "";
         if (!file) return;
-        let filas;
+        let res;
         try {
-          filas = PCT.parsearPresupuesto(await PCT.leerLibroExcel(file)).items.filter((i) => i.tipo === "item");
+          res = PCT.parsearPresupuesto(await PCT.leerLibroExcel(file));
         } catch (err) {
           return mostrarAviso(err.message, "error");
         }
-        const clave = (codigo, desc) => `${PCT.norm(codigo)}|${PCT.norm(desc)}`;
+        if (!res.columnas.includes("cu_material")) {
+          return mostrarAviso("El archivo no trae la columna «C.U. material (sin IVA)». Usa «Exportar costos (plantilla)», llénala y vuelve a importarla.", "error");
+        }
+        const clave = (codigo, desc) => `${PCT.norm(codigo)}|${PCT.norm(desc).replace(/\s+/g, " ")}`;
         const porClave = new Map();
         PCT.estado.items.filter((i) => i.tipo === "item").forEach((i) => porClave.set(clave(i.codigo, i.descripcion), i));
         const cambios = [];
         let sinPareja = 0;
-        filas.forEach((f) => {
-          const it = porClave.get(clave(f.codigo, f.descripcion));
-          if (!it) return sinPareja++;
-          cambios.push({
-            id: it.id,
-            datos: {
-              cu_material: f.cu_material, cu_mano_obra: f.cu_mano_obra, cu_transporte: f.cu_transporte,
-              concepto_alquiler: f.concepto_alquiler, cu_alquiler: f.cu_alquiler, pu_contratista: f.pu_contratista,
-            },
+        res.items
+          .filter((i) => i.tipo === "item")
+          .forEach((f) => {
+            const it = porClave.get(clave(f.codigo, f.descripcion));
+            if (!it) return sinPareja++;
+            if (PCT.num(it.cu_material) !== f.cu_material) cambios.push({ id: it.id, datos: { cu_material: f.cu_material } });
           });
-        });
-        if (!cambios.length) return mostrarAviso("Ningún renglón del archivo coincide con los ítems de la cotización (se cruzan por # y descripción).", "error");
+        if (!cambios.length) {
+          return mostrarAviso(
+            sinPareja ? "Ningún renglón del archivo coincide con los ítems de la cotización (se cruzan por # y descripción)." : "Los costos del archivo son iguales a los que ya tiene el proyecto.",
+            sinPareja ? "error" : "info"
+          );
+        }
         try {
           for (const c of cambios) {
             const { error } = await window.sb.from("presupuesto_items").update(c.datos).eq("id", c.id);

@@ -7,7 +7,8 @@ siempre qué debe hacer él después (subir a GitHub, correr SQL en Supabase, et
 ## Stack y despliegue
 
 - Frontend: HTML + CSS + JavaScript planos. **Sin build, sin npm, sin frameworks.** Tailwind por CDN.
-- Librerías por CDN: supabase-js v2, SheetJS (xlsx), jsPDF + jspdf-autotable.
+- Librerías por CDN: supabase-js v2, SheetJS (xlsx), jsPDF + jspdf-autotable. ExcelJS 4.4.0 + JSZip 3.10.1
+  se cargan **solo al exportar** (`PCT.cargarExcelJS`), porque SheetJS gratis no conserva formato ni logo.
 - Backend: Supabase (Postgres + Auth + Storage + RLS). No hay servidor propio.
 - Despliegue: push a GitHub (rama `main`) → Netlify publica solo. Supabase se actualiza a mano con
   `sql/schema.sql` en el SQL Editor.
@@ -49,9 +50,20 @@ siempre qué debe hacer él después (subir a GitHub, correr SQL en Supabase, et
 - `docs/Plantilla_Cotizacion_Pctronic.xlsx` es **el mismo Excel de cotización de Pctronic, copiado tal cual**
   (logo, colores, fórmulas). El botón "Descargar plantilla" baja ese archivo; no lo generes con SheetJS (la
   versión gratuita no copia formato ni imágenes). Si Jose cambia su formato, reemplaza ese archivo.
+- **Exportar** (Cotización y Presupuesto de costos) llena esa misma plantilla con ExcelJS
+  (`PCT.exportarCotizacionExcel`): encabezado, ítems con capítulos (franja azul), % AIU/IVA del proyecto y
+  sumas que cubren toda el área de ítems. Si no caben, inserta filas y corre a mano celdas combinadas y
+  fórmulas de abajo (ExcelJS no lo hace). Calcula los resultados de las fórmulas (vista previa de celular) y
+  corrige el tamaño del logo con JSZip (ExcelJS lo deja en 0). La versión de costos agrega a la derecha de
+  Observaciones: C.U. material (sin IVA), C.U. material (con IVA), Costo total, Margen $ y Margen % (verde/rojo);
+  **Importar costos** lee esa plantilla y solo actualiza `cu_material`, cruzando por # + descripción.
 
 ## Reglas de negocio (no las cambies sin hablar con Jose)
 
+- **Presupuesto de costos = solo material/equipos** (Jose, oct. 2026): sin mano de obra (Fase 3), transporte
+  ni alquiler (salen de Gastos). `PCT.calcItem` usa costo = cantidad × C.U. material (con IVA si
+  `iva_materiales`). Margen positivo en verde, negativo en rojo. Las columnas `cu_mano_obra`, `cu_transporte`,
+  `cu_alquiler`, `pu_contratista` siguen en la BD sin usarse aquí.
 - **El valor del contrato sale de la Cotización** (confirmado con Jose, oct. 2026): `proyectos.valor_antes_impuestos`
   = Σ cantidad × precio unitario (`pu_venta`) de los ítems de la cotización que no son adicionales (lo mantiene
   el trigger `recalcular_proyecto`). No se digita aparte. Los costos (Presupuesto de costos) NO afectan el contrato.
@@ -92,7 +104,7 @@ siempre qué debe hacer él después (subir a GitHub, correr SQL en Supabase, et
 Hecho (Fase 1): crear proyecto (admin + importar la cotización de Pctronic tal cual o la plantilla v7,
 escoger esquema AIU / IVA pleno, descargar su mismo Excel de cotización), Inicio (parámetros y tarifas de técnicos),
 Cotización (ítems con referencia, marca, tiempo de entrega, observaciones; adicionales; importar/exportar),
-Presupuesto de costos (costos por ítem, margen, exportar/importar costos cruzando por # + descripción),
+Presupuesto de costos (solo material, margen verde/rojo, exportar/importar en la plantilla de cotización),
 Avance diario (con bitácora diaria: tabla `avance_registros`), Documentos, Resumen.
 
 Pendiente, en este orden:
