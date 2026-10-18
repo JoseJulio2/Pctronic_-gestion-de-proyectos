@@ -3,7 +3,8 @@
 // Entiende tres formatos:
 //   1) la COTIZACIÓN de Pctronic (hoja "Cotizador": encabezado con cliente y
 //      referencia, ítems por secciones Suministro / Instalación y, abajo, los
-//      totales con IVA pleno y con AIU). Es la plantilla que descarga la app.
+//      totales con IVA pleno y con AIU). La app descarga ese mismo Excel
+//      (docs/Plantilla_Cotizacion_Pctronic.xlsx) como plantilla.
 //   2) la plantilla completa "PCT_Plantilla_Proyecto_v7" (hojas INICIO,
 //      PRESUPUESTO y MANO DE OBRA), y
 //   3) las hojas simples que exporta la propia app (cotización o costos).
@@ -339,74 +340,17 @@
   };
 
   // --------------------------------------------------------------------
-  // PLANTILLA DE COTIZACIÓN para descargar (mismo formato que usa Pctronic)
+  // PLANTILLA DE COTIZACIÓN para descargar: es el mismo Excel que usa
+  // Pctronic (con logo, colores y fórmulas), guardado tal cual en docs/.
   // --------------------------------------------------------------------
+  PCT.ARCHIVO_PLANTILLA_COTIZACION = "docs/Plantilla_Cotizacion_Pctronic.xlsx";
   PCT.descargarPlantillaCotizacion = () => {
-    const filaItems = 13; // primera fila de ítems (en Excel, base 1)
-    const ultimaItems = 80; // espacio para ítems antes de los totales
-    const rango = `I${filaItems}:I${ultimaItems}`;
-    const aoa = [];
-    const poner = (fila, col, v) => {
-      while (aoa.length < fila) aoa.push([]);
-      aoa[fila - 1][col] = v;
-    };
-    const A = 0, B = 1, C = 2, D = 3, E = 4, F = 5, G = 6, H = 7, I = 8, J = 9;
-
-    poner(1, A, "COTIZACIÓN");
-    poner(2, C, window.PCTRONIC_CONFIG?.NOMBRE_EMPRESA || "Pctronic Seguridad Electrónica");
-    poner(4, C, "Referencia:"); poner(4, H, "Atencion:");
-    poner(5, C, "Descripcion:"); poner(5, D, "Nombre del proyecto"); poner(5, H, "Correo:");
-    poner(6, C, "Fecha:"); poner(6, H, "Cliente:");
-    poner(7, C, "Validez de la oferta:"); poner(7, H, "Telefono:");
-    poner(8, C, "Cotizacion No."); poner(8, H, "Ciudad:");
-    poner(10, A, "DETALLE");
-    ["#", "REFERENCIA", "DESCRIPCIÓN", "CANT.", "UNIDAD", "TIEMPO DE ENTREGA", "MARCA", "Precio Unitario", "Subtotal", "Observaciones"].forEach((t, c) => poner(11, c, t));
-
-    const ejemplo = [
-      ["Suministro"],
-      [1, "REF-001", "SUMINISTRO DE CÁMARA DOMO IP 4MP", 10, "UND", "10 días", "Marca", 850000],
-      [2, "REF-002", "SUMINISTRO DE CABLE UTP CAT6", 300, "ML", "10 días", "Marca", 4500],
-      ["Instalacion"],
-      [3, "PCT.SERV.INST", "INSTALACIÓN DE CÁMARA DOMO IP 4MP", 10, "UND", "30 días", "PCTronic", 120000],
-      [4, "PCT.SERV.INST", "INSTALACIÓN DE CABLE UTP CAT6", 300, "ML", "30 días", "PCTronic", 2000],
-    ];
-    let fila = filaItems - 1;
-    ejemplo.forEach((e) => {
-      if (e.length === 1) return poner(fila++, A, e[0]);
-      e.forEach((v, c) => poner(fila, c, v));
-      poner(fila, I, { f: `D${fila}*H${fila}` });
-      fila++;
-    });
-
-    let t = ultimaItems + 2;
-    poner(t++, A, "TOTAL OFERTA SUMINISTROS");
-    const sub = t;
-    poner(t, G, "SubTotal"); poner(t++, J, { f: `SUM(${rango})` });
-    poner(t, G, "Descuento"); poner(t++, J, 0);
-    poner(t, G, "SubTotal"); poner(t, J, { f: `J${sub}-(J${sub}*J${sub + 1})` }); t++;
-    poner(t, G, "IVA"); poner(t, H, 0.19); poner(t, J, { f: `J${t - 1}*H${t}` }); t++;
-    poner(t, G, "Total"); poner(t, J, { f: `J${t - 2}+J${t - 1}` }); t++;
-    t++;
-    poner(t++, A, "TOTAL OFERTA AIU INSTALACION");
-    const cd = t;
-    poner(t, G, "TOTAL COSTO DIRECTO OBRA"); poner(t++, J, { f: `SUM(${rango})` });
-    poner(t, G, "ADMINISTRACIÓN"); poner(t, I, 0.1); poner(t, J, { f: `J${cd}*I${t}` }); t++;
-    poner(t, G, "IMPREVISTOS"); poner(t, I, 0.03); poner(t, J, { f: `J${cd}*I${t}` }); t++;
-    poner(t, G, "UTILIDAD"); poner(t, I, 0.05); poner(t, J, { f: `J${cd}*I${t}` }); t++;
-    poner(t, G, "IVA SOBRE UTILIDAD"); poner(t, I, 0.19); poner(t, J, { f: `J${t - 1}*I${t}` }); t++;
-    poner(t, G, "TOTAL"); poner(t, J, { f: `SUM(J${cd}:J${t - 1})` }); t++;
-    t += 2;
-    poner(t, B, "CONDICIONES COMERCIALES"); poner(t++, F, "ELABORADO POR:");
-    poner(t, B, "GARANTIA EQUIPOS"); poner(t, C, "12 meses"); poner(t++, F, "NOMBRE");
-    poner(t, B, "FORMA DE PAGO"); poner(t, C, "30% anticipo, saldo con actas parciales"); poner(t++, F, "CORREO");
-    poner(t, B, "OTRAS GARANTIAS"); poner(t, C, "3 meses mano de obra"); poner(t++, F, "PREVENTA");
-    poner(t, B, "MONEDA"); poner(t, C, "Peso Colombiano");
-
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws["!cols"] = [6, 16, 52, 8, 8, 14, 22, 14, 14, 18].map((wch) => ({ wch }));
-    const libro = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(libro, ws, "Cotizador");
-    XLSX.writeFile(libro, "Plantilla_Cotizacion_Pctronic.xlsx");
+    const a = document.createElement("a");
+    a.href = PCT.ARCHIVO_PLANTILLA_COTIZACION;
+    a.download = "Plantilla_Cotizacion_Pctronic.xlsx";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   };
 
   // --------------------------------------------------------------------

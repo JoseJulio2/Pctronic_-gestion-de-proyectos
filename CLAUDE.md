@@ -41,6 +41,9 @@ siempre qué debe hacer él después (subir a GitHub, correr SQL en Supabase, et
   mismo subtotal: "TOTAL OFERTA SUMINISTROS" (IVA pleno) y "TOTAL OFERTA AIU INSTALACION" (A, I, U, IVA sobre U).
   Trae solo precios de venta, no costos. Al importarla en Nuevo proyecto se pregunta con cuál oferta aceptó el
   cliente (`tipo_contrato` = `aiu` | `iva`). Puede traer filas `#REF!`: se ignoran.
+- `docs/Plantilla_Cotizacion_Pctronic.xlsx` es **el mismo Excel de cotización de Pctronic, copiado tal cual**
+  (logo, colores, fórmulas). El botón "Descargar plantilla" baja ese archivo; no lo generes con SheetJS (la
+  versión gratuita no copia formato ni imágenes). Si Jose cambia su formato, reemplaza ese archivo.
 
 ## Reglas de negocio (no las cambies sin hablar con Jose)
 
@@ -81,8 +84,8 @@ siempre qué debe hacer él después (subir a GitHub, correr SQL en Supabase, et
 
 ## Estado y hoja de ruta de Proyectos
 
-Hecho (Fase 1): crear proyecto (admin + importar la cotización de Pctronic o la plantilla v7, escoger
-esquema AIU / IVA pleno, descargar plantilla de cotización), Inicio (parámetros y tarifas de técnicos),
+Hecho (Fase 1): crear proyecto (admin + importar la cotización de Pctronic tal cual o la plantilla v7,
+escoger esquema AIU / IVA pleno, descargar su mismo Excel de cotización), Inicio (parámetros y tarifas de técnicos),
 Cotización (ítems con referencia, marca, tiempo de entrega, observaciones; adicionales; importar/exportar),
 Presupuesto de costos (costos por ítem, margen, exportar/importar costos cruzando por # + descripción),
 Avance diario (con bitácora diaria: tabla `avance_registros`), Documentos, Resumen.
