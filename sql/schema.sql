@@ -1,5 +1,6 @@
 -- ============================================================================
--- PCTRONIC · Esquema de base de datos para Supabase (v2 — desarrollo completo)
+-- PCTRONIC · Esquema de base de datos para Supabase (v3 — Proyectos rediseñado
+-- a partir de la plantilla "PCT_Plantilla_Proyecto_v7")
 -- ----------------------------------------------------------------------------
 -- Cómo usar este archivo:
 -- 1. Entra a tu proyecto de Supabase (https://supabase.com/dashboard)
@@ -9,6 +10,15 @@
 -- Como solo tienes datos de prueba, esto es seguro. Si más adelante ya tienes
 -- información real y necesitas otro cambio, avísame para preparar una
 -- migración que no borre nada.
+--
+-- Mapa plantilla Excel → tablas:
+--   INICIO ............ proyectos (+ parámetros) · tarifas_tecnicos
+--   PRESUPUESTO ....... presupuesto_items (tabla madre: venta + costos por tipo)
+--   (NUEVO) AVANCE .... avance_registros (bitácora diaria) · avance_items
+--   CORTES CLIENTE .... cortes_cliente · cortes_cliente_items
+--   MANO DE OBRA ...... cortes_mo · cortes_mo_items · registro_mo_propia
+--   GASTOS ............ gastos (única fuente de todo el dinero que sale)
+--   CRONOGRAMA ........ cronograma_actividades
 -- ============================================================================
 
 create extension if not exists "pgcrypto";
@@ -16,6 +26,16 @@ create extension if not exists "pgcrypto";
 -- ----------------------------------------------------------------------------
 -- 0. LIMPIEZA PREVIA
 -- ----------------------------------------------------------------------------
+drop table if exists public.cronograma_actividades cascade;
+drop table if exists public.registro_mo_propia cascade;
+drop table if exists public.tarifas_tecnicos cascade;
+drop table if exists public.cortes_mo_items cascade;
+drop table if exists public.cortes_mo cascade;
+drop table if exists public.cortes_cliente_items cascade;
+drop table if exists public.cortes_cliente cascade;
+drop table if exists public.avance_items cascade;
+drop table if exists public.avance_registros cascade;
+drop table if exists public.gastos cascade;
 drop table if exists public.suministros cascade;
 drop table if exists public.tareas cascade;
 drop table if exists public.documentos cascade;
@@ -36,6 +56,10 @@ drop table if exists public.proveedores cascade;
 drop table if exists public.clientes cascade;
 drop table if exists public.empresas cascade;
 drop table if exists public.profiles cascade;
+drop function if exists public.recalcular_avance_proyecto() cascade;
+drop function if exists public.recalcular_proyecto(uuid) cascade;
+drop function if exists public.trg_presupuesto_recalcular() cascade;
+drop function if exists public.trg_avance_recalcular() cascade;
 
 -- ----------------------------------------------------------------------------
 -- 1. PERFILES DE USUARIO
@@ -174,36 +198,60 @@ create table public.contratistas (
 );
 
 -- ----------------------------------------------------------------------------
--- 6. PROYECTOS (empresa propia, multi-tipo, IVA o AIU)
+-- 6. PROYECTOS  (hoja INICIO de la plantilla: datos + parámetros financieros)
 -- ----------------------------------------------------------------------------
+-- Regla AIU (confirmada con el negocio): el IVA se cobra ÚNICAMENTE sobre la
+-- Utilidad. `valor_antes_impuestos` es el COSTO DIRECTO de venta y lo mantiene
+-- solo la base de datos (suma de los ítems del presupuesto, sin adicionales).
 create table public.proyectos (
   id uuid primary key default gen_random_uuid(),
   nombre text not null,
   numero_contrato text,
   empresa_id uuid references public.empresas(id) on delete set null,
   cliente_id uuid references public.clientes(id) on delete set null,
+  ciudad text,
+  numero_cotizacion text,
+  fecha_cotizacion date,
   tipo_proyecto text[] not null default '{}',
   estado text not null default 'sin_iniciar'
     check (estado in ('sin_iniciar','en_curso','detenido','finalizado')),
   fecha_contrato date,
   fecha_inicio date,
   fecha_fin_estimada date,
+  director_proyecto text,
+  comercial_responsable text,
 
-  -- Quién ejecuta el proyecto en general (informativo; cada renglón del
-  -- presupuesto puede además tener su propio contratista específico).
+  -- Contratista de mano de obra del proyecto (hoja MANO DE OBRA).
   ejecutor_tipo text not null default 'personal_propio'
     check (ejecutor_tipo in ('personal_propio','contratista')),
   contratista_principal_id uuid references public.contratistas(id) on delete set null,
 
-  -- Valores del contrato: o bien IVA simple, o bien AIU.
-  -- En AIU, el IVA se cobra ÚNICAMENTE sobre el componente de Utilidad (regla
-  -- estándar de la DIAN para contratos de obra/servicios bajo AIU).
-  tipo_contrato text not null default 'iva' check (tipo_contrato in ('iva','aiu')),
-  valor_antes_impuestos numeric(14,2) not null default 0,
+  -- Parámetros financieros
+  tipo_contrato text not null default 'aiu' check (tipo_contrato in ('iva','aiu')),
+  valor_antes_impuestos numeric(14,2) not null default 0,   -- costo directo (lo calcula un trigger)
   iva_porcentaje numeric(5,2) not null default 19,
   administracion_porcentaje numeric(5,2) not null default 0,
   imprevistos_porcentaje numeric(5,2) not null default 0,
   utilidad_porcentaje numeric(5,2) not null default 0,
+  iva_materiales boolean not null default true,              -- ¿sumar IVA al costo de materiales?
+  anticipo_porcentaje numeric(5,2) not null default 0,       -- se amortiza en cada acta
+  anticipo_recibido numeric(14,2) not null default 0,
+  impuestos_porcentaje numeric(6,3) not null default 0,      -- % sobre costo directo
+  polizas_porcentaje numeric(6,3) not null default 0,        -- % sobre total contrato
+  legales_porcentaje numeric(6,3) not null default 0,        -- % sobre costo directo
+  recargo_hora_extra_porcentaje numeric(5,2) not null default 25,
+
+  -- Ingreso sin IVA = CD + A + I + U  (para margen)
+  valor_ingreso numeric(14,2) generated always as (
+    case
+      when tipo_contrato = 'aiu' then
+        valor_antes_impuestos * (1 + (coalesce(administracion_porcentaje,0)
+          + coalesce(imprevistos_porcentaje,0) + coalesce(utilidad_porcentaje,0)) / 100.0)
+      else valor_antes_impuestos
+    end
+  ) stored,
+
+  -- Total contrato: AIU → CD·(1+A+I+U) + IVA·U ;  IVA simple → CD·(1+IVA)
   valor_total numeric(14,2) generated always as (
     case
       when tipo_contrato = 'aiu' then
@@ -212,71 +260,119 @@ create table public.proyectos (
                 + coalesce(imprevistos_porcentaje,0)
                 + coalesce(utilidad_porcentaje,0)) / 100.0
         )
-        -- + IVA solo sobre la Utilidad
         + (valor_antes_impuestos * coalesce(utilidad_porcentaje,0) / 100.0) * coalesce(iva_porcentaje,0) / 100.0
       else
         valor_antes_impuestos * (1 + coalesce(iva_porcentaje,0) / 100.0)
     end
   ) stored,
 
+  -- AVANCE FÍSICO REAL: lo calcula la base de datos desde el Avance diario
+  -- (valor ejecutado / costo directo del contrato). NO depende de cortes,
+  -- facturas ni pagos.
   avance_porcentaje int not null default 0 check (avance_porcentaje between 0 and 100),
   notas text,
   created_by uuid references public.profiles(id) on delete set null,
   created_at timestamptz not null default now()
 );
 
--- ----------------------------------------------------------------------------
--- 6B. COTIZACIÓN DEL PROYECTO (lado venta — la oferta con la que se contrató)
--- ----------------------------------------------------------------------------
--- Este es el renglonado con el que se ofertó el proyecto al cliente. Su suma
--- (subtotal) alimenta automáticamente `proyectos.valor_antes_impuestos`, y
--- sus cantidades son las que se usan en el "Corte de Obra" para calcular lo
--- ejecutado/pendiente y generar la factura al cliente.
-create table public.cotizacion_items (
+-- Tarifas de los técnicos propios (hoja INICIO, tabla "TARIFAS TÉCNICOS PROPIOS")
+create table public.tarifas_tecnicos (
   id uuid primary key default gen_random_uuid(),
   proyecto_id uuid not null references public.proyectos(id) on delete cascade,
-  numero int,
-  referencia text,
-  descripcion text not null,
-  cantidad numeric(14,2) not null default 1,
-  unidad text default 'un',
-  tiempo_entrega text,
-  marca text,
-  precio_unitario numeric(14,2) not null default 0,
-  subtotal numeric(14,2) generated always as (cantidad * precio_unitario) stored,
-  observaciones text,
+  cargo text not null,
+  valor_hora numeric(14,2) not null default 0,
+  horas_dia numeric(5,2) not null default 8,
   created_at timestamptz not null default now()
 );
 
 -- ----------------------------------------------------------------------------
--- 7. PRESUPUESTO DE COSTOS (Materiales/Equipos/Alquileres y Mano de Obra)
+-- 7. PRESUPUESTO (hoja PRESUPUESTO: tabla madre del proyecto)
 -- ----------------------------------------------------------------------------
--- Lado costo del proyecto (lo que cuesta ejecutarlo, no lo que se cobra).
--- tipo MO = Presupuesto de Mano de Obra (alimenta el Corte de Contratista);
--- tipo MP/EQUIPO/ALQUILER/OTRO = Presupuesto de Materiales, Equipos y
--- Alquileres (referencia para comparar contra las Compras reales).
+-- Una sola tabla con capítulos, subcapítulos e ítems. Cada ÍTEM trae el precio
+-- de venta (lo que se cobra al cliente) y los costos unitarios por tipo
+-- (material, mano de obra, transporte, alquiler) → margen por ítem.
+-- `es_adicional` marca ítems que salen en obra y NO estaban en el contrato:
+-- se pueden avanzar y cortar (cliente y contratista) igual que los demás, pero
+-- no suman al valor base del contrato ni al denominador del avance físico.
 create table public.presupuesto_items (
   id uuid primary key default gen_random_uuid(),
   proyecto_id uuid not null references public.proyectos(id) on delete cascade,
-  tipo text not null default 'MP' check (tipo in ('MP','MO','EQUIPO','ALQUILER','OTRO')),
-  numero int,
-  referencia text,
+  tipo text not null default 'item' check (tipo in ('capitulo','subcapitulo','item')),
+  orden double precision not null default 0,   -- decimal: permite insertar entre dos filas sin renumerar
+  codigo text,                                  -- columna "Ítem" (1, 1.1, 2.3 ...)
   descripcion text not null,
   unidad text default 'un',
-  cantidad numeric(14,2) not null default 1,
-  tiempo_entrega text,
-  marca text,
-  valor_unitario numeric(14,2) not null default 0,
-  valor_total numeric(14,2) generated always as (cantidad * valor_unitario) stored,
-  -- Si este renglón lo ejecuta un contratista específico, sus cantidades
-  -- instaladas alimentan automáticamente el corte de pago de ese contratista.
-  contratista_id uuid references public.contratistas(id) on delete set null,
+  cantidad numeric(14,2) not null default 0,
+  pu_venta numeric(14,2) not null default 0,
+  cu_material numeric(14,2) not null default 0,       -- sin IVA
+  cu_mano_obra numeric(14,2) not null default 0,
+  cu_transporte numeric(14,2) not null default 0,
+  concepto_alquiler text,
+  cu_alquiler numeric(14,2) not null default 0,
+  pu_contratista numeric(14,2),                        -- precio pactado con el contratista (null = sin asignar)
+  cant_inicial_comprada numeric(14,2) not null default 0, -- comprado ANTES de usar Gastos
   es_adicional boolean not null default false,
+  total_venta numeric(14,2) generated always as (
+    case when tipo = 'item' then cantidad * pu_venta else 0 end
+  ) stored,
   created_at timestamptz not null default now()
 );
+create index presupuesto_items_proyecto_idx on public.presupuesto_items (proyecto_id, orden);
+
+-- Recalcula costo directo y avance físico del proyecto.
+create or replace function public.recalcular_proyecto(p_proyecto uuid)
+returns void
+language plpgsql
+as $$
+declare
+  v_cd numeric;
+  v_base numeric;
+  v_ejec numeric;
+begin
+  select coalesce(sum(total_venta), 0) into v_cd
+  from public.presupuesto_items
+  where proyecto_id = p_proyecto and tipo = 'item' and not es_adicional;
+
+  -- valor ejecutado (tope = cantidad contratada de cada ítem) sobre el CD base
+  select coalesce(sum(least(coalesce(e.cant, 0), i.cantidad) * i.pu_venta), 0)
+  into v_ejec
+  from public.presupuesto_items i
+  left join (
+    select presupuesto_item_id, sum(cantidad) as cant
+    from public.avance_items
+    where proyecto_id = p_proyecto
+    group by presupuesto_item_id
+  ) e on e.presupuesto_item_id = i.id
+  where i.proyecto_id = p_proyecto and i.tipo = 'item' and not i.es_adicional;
+
+  update public.proyectos
+  set valor_antes_impuestos = v_cd,
+      avance_porcentaje = case when v_cd > 0 then least(100, round(v_ejec / v_cd * 100)) else 0 end
+  where id = p_proyecto;
+end;
+$$;
+
+create or replace function public.trg_recalcular_proyecto()
+returns trigger
+language plpgsql
+as $$
+begin
+  if (tg_op in ('UPDATE','INSERT')) then
+    perform public.recalcular_proyecto(new.proyecto_id);
+  end if;
+  if (tg_op = 'DELETE' or (tg_op = 'UPDATE' and old.proyecto_id is distinct from new.proyecto_id)) then
+    perform public.recalcular_proyecto(old.proyecto_id);
+  end if;
+  return null;
+end;
+$$;
+
+create trigger trg_presupuesto_recalcular
+  after insert or update or delete on public.presupuesto_items
+  for each row execute procedure public.trg_recalcular_proyecto();
 
 -- ----------------------------------------------------------------------------
--- 8. FACTURACIÓN (a los clientes)
+-- 8. FACTURACIÓN (a los clientes) — vista global, se mantiene para el Panel
 -- ----------------------------------------------------------------------------
 create table public.facturas (
   id uuid primary key default gen_random_uuid(),
@@ -292,7 +388,8 @@ create table public.facturas (
 );
 
 -- ----------------------------------------------------------------------------
--- 9. COMPRAS Y COSTOS (antes de IVA / total con IVA)
+-- 9. COMPRAS (heredada) — la reemplaza GASTOS; se conserva para que la vista
+-- global y el Panel sigan funcionando hasta migrarlos en la fase de Gastos.
 -- ----------------------------------------------------------------------------
 create table public.compras (
   id uuid primary key default gen_random_uuid(),
@@ -301,8 +398,6 @@ create table public.compras (
   categoria text not null default 'materiales'
     check (categoria in ('materiales','mano_obra','equipos','alquiler','otros')),
   descripcion text not null,
-  -- Vínculo opcional a un renglón del presupuesto (Sección 7) para poder
-  -- trazar el gasto real ítem por ítem, no solo por categoría agregada.
   presupuesto_item_id uuid references public.presupuesto_items(id) on delete set null,
   numero_factura text,
   factura_url text,
@@ -314,7 +409,7 @@ create table public.compras (
 );
 
 -- ----------------------------------------------------------------------------
--- 10. CONTRATISTAS VINCULADOS A UN PROYECTO + CORTES DE PAGO
+-- 10. CONTRATISTAS VINCULADOS + CORTES DE PAGO (heredados, solo para el Panel)
 -- ----------------------------------------------------------------------------
 create table public.proyecto_contratistas (
   id uuid primary key default gen_random_uuid(),
@@ -338,78 +433,181 @@ create table public.cortes_pago (
 );
 
 -- ----------------------------------------------------------------------------
--- 11. EJECUCIÓN / AVANCE DE OBRA (liga el cronograma con factura y pagos)
+-- 11. AVANCE DIARIO (pestaña nueva — fuente del AVANCE FÍSICO REAL)
 -- ----------------------------------------------------------------------------
--- Un "corte de ejecución" es un periodo (ej. quincena). Por cada renglón del
--- presupuesto se anota cuánto se instaló en ese periodo. Esa cantidad es la
--- que luego se usa, con un botón, para generar la factura al cliente y el
--- corte de pago del contratista correspondiente — así los tres siempre
--- concuerdan con lo realmente instalado.
-create table public.ejecucion_cortes (
+-- Una bitácora por día y proyecto (clima, observaciones, novedades) y, debajo,
+-- las cantidades ejecutadas ese día por ítem del presupuesto, indicando quién
+-- las ejecutó (contratista o personal propio). Los ítems adicionales también
+-- se avanzan aquí. De esta tabla salen: el % de avance del proyecto, lo que
+-- queda pendiente por cortar al cliente y lo que se le debe cortar al
+-- contratista.
+create table public.avance_registros (
   id uuid primary key default gen_random_uuid(),
   proyecto_id uuid not null references public.proyectos(id) on delete cascade,
-  numero_corte int not null,
-  fecha_corte date not null default current_date,
-  descripcion text,
+  fecha date not null default current_date,
+  clima text,
+  observaciones text,
+  novedades text,
+  created_by uuid references public.profiles(id) on delete set null,
   created_at timestamptz not null default now(),
-  unique (proyecto_id, numero_corte)
+  unique (proyecto_id, fecha)
 );
 
--- Cada renglón de un corte apunta O BIEN a un renglón de la Cotización
--- (item_tipo = 'cotizacion' → avance de Obra, alimenta la factura al
--- cliente) O BIEN a un renglón de Mano de Obra del presupuesto
--- (item_tipo = 'mano_obra' → avance del Contratista, alimenta su corte de
--- pago). Nunca ambos ni ninguno.
-create table public.ejecucion_items (
+create table public.avance_items (
   id uuid primary key default gen_random_uuid(),
-  corte_id uuid not null references public.ejecucion_cortes(id) on delete cascade,
-  item_tipo text not null default 'cotizacion' check (item_tipo in ('cotizacion','mano_obra')),
-  cotizacion_item_id uuid references public.cotizacion_items(id) on delete cascade,
-  presupuesto_item_id uuid references public.presupuesto_items(id) on delete cascade,
-  cantidad_periodo numeric(14,2) not null default 0,
-  valor_unitario_snapshot numeric(14,2) not null default 0,
-  valor_periodo numeric(14,2) generated always as (cantidad_periodo * valor_unitario_snapshot) stored,
+  registro_id uuid not null references public.avance_registros(id) on delete cascade,
+  proyecto_id uuid not null references public.proyectos(id) on delete cascade,
+  presupuesto_item_id uuid not null references public.presupuesto_items(id) on delete cascade,
+  cantidad numeric(14,2) not null default 0,
+  ejecutor text not null default 'contratista' check (ejecutor in ('contratista','propio')),
+  notas text,
+  created_at timestamptz not null default now()
+);
+create index avance_items_item_idx on public.avance_items (presupuesto_item_id);
+create index avance_items_proyecto_idx on public.avance_items (proyecto_id);
+
+create trigger trg_avance_recalcular
+  after insert or update or delete on public.avance_items
+  for each row execute procedure public.trg_recalcular_proyecto();
+
+-- ----------------------------------------------------------------------------
+-- 12. CORTES DE CLIENTE (hoja CORTES CLIENTE: acta de cobro)
+-- ----------------------------------------------------------------------------
+-- La cantidad cortada de cada ítem se propone desde lo ejecutado en el Avance
+-- diario que aún no se ha cortado, pero se puede ajustar. Los cortes son
+-- ilimitados (la plantilla de Excel tenía 6 columnas fijas).
+create table public.cortes_cliente (
+  id uuid primary key default gen_random_uuid(),
+  proyecto_id uuid not null references public.proyectos(id) on delete cascade,
+  numero int not null,
+  fecha date not null default current_date,
+  estado text not null default 'pendiente' check (estado in ('pendiente','facturado','pagado')),
+  numero_factura text,
+  fecha_factura date,
+  valor_recaudado numeric(14,2) not null default 0,
   notas text,
   created_at timestamptz not null default now(),
-  constraint ejecucion_items_referencia_valida check (
-    (item_tipo = 'cotizacion' and cotizacion_item_id is not null and presupuesto_item_id is null)
-    or
-    (item_tipo = 'mano_obra' and presupuesto_item_id is not null and cotizacion_item_id is null)
-  )
+  unique (proyecto_id, numero)
 );
 
-create unique index ejecucion_items_uq_cotizacion
-  on public.ejecucion_items (corte_id, cotizacion_item_id)
-  where cotizacion_item_id is not null;
-
-create unique index ejecucion_items_uq_presupuesto
-  on public.ejecucion_items (corte_id, presupuesto_item_id)
-  where presupuesto_item_id is not null;
-
--- Registro de qué se generó (factura / corte de contratista) a partir de cada
--- corte de ejecución, para no duplicar y para poder mostrar "Ya generado".
-create table public.ejecucion_generaciones (
+create table public.cortes_cliente_items (
   id uuid primary key default gen_random_uuid(),
-  corte_id uuid not null references public.ejecucion_cortes(id) on delete cascade,
-  tipo text not null check (tipo in ('factura','corte_contratista')),
-  factura_id uuid references public.facturas(id) on delete cascade,
-  corte_pago_id uuid references public.cortes_pago(id) on delete cascade,
-  proyecto_contratista_id uuid references public.proyecto_contratistas(id) on delete set null,
+  corte_id uuid not null references public.cortes_cliente(id) on delete cascade,
+  presupuesto_item_id uuid not null references public.presupuesto_items(id) on delete cascade,
+  cantidad numeric(14,2) not null default 0,
+  pu_venta_snapshot numeric(14,2) not null default 0,
+  created_at timestamptz not null default now(),
+  unique (corte_id, presupuesto_item_id)
+);
+
+-- ----------------------------------------------------------------------------
+-- 13. MANO DE OBRA (hoja MANO DE OBRA): cortes del contratista + técnicos propios
+-- ----------------------------------------------------------------------------
+-- El corte del contratista toma lo que el Avance diario marcó como ejecutado
+-- por él ('contratista') y aún no se le ha cortado — esté pagado o no.
+create table public.cortes_mo (
+  id uuid primary key default gen_random_uuid(),
+  proyecto_id uuid not null references public.proyectos(id) on delete cascade,
+  numero int not null,
+  fecha date not null default current_date,
+  numero_cuenta_cobro text,
+  notas text,
+  created_at timestamptz not null default now(),
+  unique (proyecto_id, numero)
+);
+
+create table public.cortes_mo_items (
+  id uuid primary key default gen_random_uuid(),
+  corte_id uuid not null references public.cortes_mo(id) on delete cascade,
+  presupuesto_item_id uuid not null references public.presupuesto_items(id) on delete cascade,
+  cantidad numeric(14,2) not null default 0,
+  pu_contratista_snapshot numeric(14,2) not null default 0,
+  created_at timestamptz not null default now(),
+  unique (corte_id, presupuesto_item_id)
+);
+
+-- Una fila por técnico propio y día. Valor = valor_hora · (días·horas_día + extra·(1+recargo)).
+create table public.registro_mo_propia (
+  id uuid primary key default gen_random_uuid(),
+  proyecto_id uuid not null references public.proyectos(id) on delete cascade,
+  fecha date not null default current_date,
+  tecnico text not null,
+  tarifa_id uuid references public.tarifas_tecnicos(id) on delete set null,
+  presupuesto_item_id uuid references public.presupuesto_items(id) on delete set null,
+  dias numeric(6,2) not null default 1,
+  horas_dia numeric(5,2),
+  horas_extra numeric(6,2) not null default 0,
+  observaciones text,
   created_at timestamptz not null default now()
 );
 
 -- ----------------------------------------------------------------------------
--- 11B. DOCUMENTOS DEL PROYECTO (contratos, cotizaciones, órdenes, planos...)
+-- 14. GASTOS (hoja GASTOS: ÚNICA fuente de todo el dinero que sale)
+-- ----------------------------------------------------------------------------
+-- Una fila por ítem comprado o por pago, con su precio real. No se corrigen
+-- compras viejas. `categoria` se deduce del tipo.
+create table public.gastos (
+  id uuid primary key default gen_random_uuid(),
+  proyecto_id uuid not null references public.proyectos(id) on delete cascade,
+  fecha date not null default current_date,
+  tipo text not null default 'Material'
+    check (tipo in ('Material','Equipo','Suministro','Alquiler','Transporte','Mano de obra contratista')),
+  proveedor_id uuid references public.proveedores(id) on delete set null,
+  proveedor_texto text,
+  documento text,                                     -- N° factura / OC
+  factura_url text,                                   -- archivo de la factura
+  presupuesto_item_id uuid references public.presupuesto_items(id) on delete set null,
+  corte_mo_id uuid references public.cortes_mo(id) on delete set null, -- pago de un corte del contratista
+  descripcion text,
+  cantidad numeric(14,2),
+  valor_unitario numeric(14,2) not null default 0,
+  valor_total numeric(14,2) generated always as (coalesce(cantidad, 1) * valor_unitario) stored,
+  observaciones text,
+  categoria text generated always as (
+    case
+      when tipo in ('Material','Equipo','Suministro') then 'Materiales y equipos'
+      when tipo = 'Mano de obra contratista' then 'Mano de obra contratista'
+      when tipo = 'Transporte' then 'Transporte y otros'
+      else 'Alquileres'
+    end
+  ) stored,
+  created_at timestamptz not null default now()
+);
+create index gastos_proyecto_idx on public.gastos (proyecto_id, fecha);
+
+-- ----------------------------------------------------------------------------
+-- 15. CRONOGRAMA (hoja CRONOGRAMA: fases, hitos, actividades, Gantt)
+-- ----------------------------------------------------------------------------
+-- Las fechas (inicio / fin) se calculan en la app: real › inicio fijo › fin de
+-- la predecesora + 1 › inicio del proyecto. El % de las actividades de
+-- instalación sale del Avance diario del capítulo vinculado.
+create table public.cronograma_actividades (
+  id uuid primary key default gen_random_uuid(),
+  proyecto_id uuid not null references public.proyectos(id) on delete cascade,
+  orden double precision not null default 0,
+  tipo text not null default 'gestion'
+    check (tipo in ('fase','hito','gestion','compra','instalacion','pruebas')),
+  nombre text not null,
+  responsable text,
+  frente_item_id uuid references public.presupuesto_items(id) on delete set null, -- capítulo vinculado
+  predecesora_id uuid references public.cronograma_actividades(id) on delete set null,
+  inicio_fijo date,
+  dias int not null default 1,
+  inicio_real date,
+  fin_real date,
+  pct_manual numeric(5,2) check (pct_manual between 0 and 100),
+  created_at timestamptz not null default now()
+);
+
+-- ----------------------------------------------------------------------------
+-- 16. DOCUMENTOS DEL PROYECTO (contratos, planos, soportes de cortes...)
 -- ----------------------------------------------------------------------------
 create table public.documentos (
   id uuid primary key default gen_random_uuid(),
   proyecto_id uuid not null references public.proyectos(id) on delete cascade,
   categoria text not null default 'otro'
     check (categoria in ('contrato','cotizacion','orden_compra','planos','polizas','acta_entrega','corte','otro')),
-  -- Si el documento es una factura/soporte adjuntado desde un Corte de
-  -- Cliente específico (pestaña Cortes → Corte de Cliente), queda vinculado
-  -- aquí para poder listarlo junto a ese corte y en su Acta en PDF.
-  corte_id uuid references public.ejecucion_cortes(id) on delete cascade,
+  corte_id uuid references public.cortes_cliente(id) on delete cascade,
   nombre_archivo text not null,
   url text not null,
   subido_por uuid references public.profiles(id) on delete set null,
@@ -417,73 +615,7 @@ create table public.documentos (
 );
 
 -- ----------------------------------------------------------------------------
--- 11C. CRONOGRAMA DE EJECUCIÓN (Vista de lista + Kanban + Gantt)
--- ----------------------------------------------------------------------------
--- Cada tarea "pesa" según el valor económico del renglón que tenga vinculado:
--- el de COTIZACIÓN (peso = valor de venta al cliente) tiene prioridad; si no
--- hay, se usa el de PRESUPUESTO (peso = valor de costo); si tampoco, el
--- peso_manual. Además cada tarea tiene su propio % de avance (0-100, no solo
--- "hecha o no hecha"), así se puede reportar un avance parcial de una
--- actividad larga. El % de avance del PROYECTO es el promedio ponderado de
--- avance_pct de todas sus tareas, usando ese peso — el mismo principio de una
--- curva S de obra: Σ(peso_i × avance_pct_i) / Σ(peso_i).
-create table public.tareas (
-  id uuid primary key default gen_random_uuid(),
-  proyecto_id uuid not null references public.proyectos(id) on delete cascade,
-  cotizacion_item_id uuid references public.cotizacion_items(id) on delete set null,
-  presupuesto_item_id uuid references public.presupuesto_items(id) on delete set null,
-  titulo text not null,
-  descripcion text,
-  estado text not null default 'todo'
-    check (estado in ('todo','en_progreso','revision','hecho')),
-  fecha_inicio date,
-  fecha_fin date,
-  orden int not null default 0,
-  peso_manual numeric(14,2),
-  avance_pct int not null default 0 check (avance_pct between 0 and 100),
-  created_at timestamptz not null default now()
-);
-
--- Recalcula el % de avance del proyecto cada vez que cambian sus tareas,
--- ponderando el avance_pct de cada una por el valor del renglón vinculado (o
--- el peso manual si no tiene renglón). No se puede hacer con una columna
--- generada porque necesita mirar varias filas de otra tabla.
-create or replace function public.recalcular_avance_proyecto()
-returns trigger
-language plpgsql
-as $$
-declare
-  v_proyecto_id uuid;
-  v_total_peso numeric;
-  v_peso_avanzado numeric;
-  v_nuevo_avance int;
-begin
-  v_proyecto_id := coalesce(new.proyecto_id, old.proyecto_id);
-
-  select
-    coalesce(sum(coalesce(ci.subtotal, pi.valor_total, t.peso_manual, 1)), 0),
-    coalesce(sum(coalesce(ci.subtotal, pi.valor_total, t.peso_manual, 1) * coalesce(t.avance_pct, 0) / 100.0), 0)
-  into v_total_peso, v_peso_avanzado
-  from public.tareas t
-  left join public.cotizacion_items ci on ci.id = t.cotizacion_item_id
-  left join public.presupuesto_items pi on pi.id = t.presupuesto_item_id
-  where t.proyecto_id = v_proyecto_id;
-
-  v_nuevo_avance := case when v_total_peso > 0 then round((v_peso_avanzado / v_total_peso) * 100) else 0 end;
-
-  update public.proyectos set avance_porcentaje = v_nuevo_avance where id = v_proyecto_id;
-  return null;
-end;
-$$;
-
-drop trigger if exists trg_recalcular_avance on public.tareas;
-create trigger trg_recalcular_avance
-  after insert or update or delete on public.tareas
-  for each row execute procedure public.recalcular_avance_proyecto();
-
--- ----------------------------------------------------------------------------
--- 11D. SUMINISTROS (ventas de equipos/insumos sin instalación, para el
--- panel de comité de gerencia)
+-- 17. SUMINISTROS (ventas de equipos/insumos sin instalación)
 -- ----------------------------------------------------------------------------
 create table public.suministros (
   id uuid primary key default gen_random_uuid(),
@@ -502,11 +634,43 @@ create table public.suministros (
 );
 
 -- ----------------------------------------------------------------------------
--- 12. SEGURIDAD (Row Level Security)
+-- 18. VISTA DE EJECUCIÓN POR ÍTEM (lo que usan Avance, Cortes y Cronograma)
 -- ----------------------------------------------------------------------------
--- Igual que antes: cualquier usuario con cuenta creada por ti puede ver y
--- editar la información. La seguridad real está en que tú controlas quién
--- tiene usuario. Se puede afinar por rol más adelante si se necesita.
+create or replace view public.v_item_ejecucion
+with (security_invoker = true) as
+select
+  i.id as presupuesto_item_id,
+  i.proyecto_id,
+  coalesce(a.total, 0)       as cant_ejecutada,
+  coalesce(a.contratista, 0) as cant_ejecutada_contratista,
+  coalesce(a.propio, 0)      as cant_ejecutada_propio,
+  coalesce(c.total, 0)       as cant_cortada_cliente,
+  coalesce(m.total, 0)       as cant_cortada_mo,
+  coalesce(a.total, 0) - coalesce(c.total, 0)       as pendiente_cortar_cliente,
+  coalesce(a.contratista, 0) - coalesce(m.total, 0) as pendiente_cortar_mo
+from public.presupuesto_items i
+left join (
+  select presupuesto_item_id,
+         sum(cantidad) as total,
+         sum(cantidad) filter (where ejecutor = 'contratista') as contratista,
+         sum(cantidad) filter (where ejecutor = 'propio') as propio
+  from public.avance_items group by presupuesto_item_id
+) a on a.presupuesto_item_id = i.id
+left join (
+  select presupuesto_item_id, sum(cantidad) as total
+  from public.cortes_cliente_items group by presupuesto_item_id
+) c on c.presupuesto_item_id = i.id
+left join (
+  select presupuesto_item_id, sum(cantidad) as total
+  from public.cortes_mo_items group by presupuesto_item_id
+) m on m.presupuesto_item_id = i.id
+where i.tipo = 'item';
+
+-- ----------------------------------------------------------------------------
+-- 19. SEGURIDAD (Row Level Security)
+-- ----------------------------------------------------------------------------
+-- Cualquier usuario con cuenta creada por ti puede ver y editar la información.
+-- La seguridad real está en que tú controlas quién tiene usuario.
 do $$
 declare
   t text;
@@ -514,10 +678,11 @@ begin
   for t in
     select unnest(array[
       'profiles','empresas','clientes','clientes_contactos','proveedores',
-      'proveedores_contactos','contratistas','proyectos','cotizacion_items',
+      'proveedores_contactos','contratistas','proyectos','tarifas_tecnicos',
       'presupuesto_items','facturas','compras','proyecto_contratistas','cortes_pago',
-      'ejecucion_cortes','ejecucion_items','ejecucion_generaciones',
-      'documentos','tareas','suministros'
+      'avance_registros','avance_items','cortes_cliente','cortes_cliente_items',
+      'cortes_mo','cortes_mo_items','registro_mo_propia','gastos',
+      'cronograma_actividades','documentos','suministros'
     ])
   loop
     execute format('alter table public.%I enable row level security;', t);
@@ -536,12 +701,7 @@ begin
   end loop;
 end $$;
 
--- Crear proyectos nuevos es una acción exclusiva del administrador (la app
--- también lo valida en pantalla, pero la regla real vive aquí): se reemplaza
--- la política genérica de inserción de "proyectos" por una que exige que el
--- usuario autenticado tenga rol 'admin' en profiles. El resto de acciones
--- sobre proyectos (ver, editar, borrar) siguen abiertas a cualquier usuario
--- con cuenta, igual que las demás tablas.
+-- Crear proyectos nuevos es una acción exclusiva del administrador.
 drop policy if exists "authenticated_insert" on public.proyectos;
 create policy "solo_admin_insert_proyectos" on public.proyectos
   for insert to authenticated
@@ -550,7 +710,7 @@ create policy "solo_admin_insert_proyectos" on public.proyectos
   );
 
 -- ----------------------------------------------------------------------------
--- 13. ALMACENAMIENTO (fotos de perfil)
+-- 20. ALMACENAMIENTO (fotos de perfil)
 -- ----------------------------------------------------------------------------
 -- 'avatars' = fotos de perfil, 'logos' = logos de tus empresas (para los PDF),
 -- 'documentos' = archivos adjuntos de cada proyecto (contratos, planos, etc).
@@ -581,7 +741,7 @@ begin
 end $$;
 
 -- ----------------------------------------------------------------------------
--- 14. DATOS DE EJEMPLO (opcional, para probar de inmediato)
+-- 21. DATOS DE EJEMPLO (opcional, para probar de inmediato)
 -- ----------------------------------------------------------------------------
 insert into public.empresas (nombre, nit)
 select 'Pctronic Seguridad Electrónica SAS', '900123456-7'

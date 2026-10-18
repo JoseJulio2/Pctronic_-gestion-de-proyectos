@@ -17,23 +17,20 @@ explicado todo, sin dar por hecho que sabes de programación.
 ├── login.html               → inicio de sesión
 ├── dashboard.html            → panel principal (KPIs personalizables + Modo Comité de Gerencia)
 ├── proyectos.html            → listado de proyectos
-├── proyecto-nuevo.html       → asistente de 2 pasos para crear un proyecto: (1) info general,
-│                                ejecutor e impuestos (IVA/AIU) y (2) Cotización, Presupuesto de
-│                                Materiales/Equipos/Alquileres, Presupuesto de Mano de Obra y
-│                                Documentos — manual o importando plantilla Excel
-├── proyecto-detalle.html     → detalle de un proyecto: Resumen, Cotización, Presupuesto
-│                                (filtro por categoría o General), Cronograma de Ejecución
-│                                (Vista/Kanban/Gantt con avance ponderado por peso financiero),
-│                                Cortes (subpestañas Cliente y Mano de Obra, cada una con su
-│                                propia Acta en PDF y, en Cliente, adjuntos de facturas/soportes),
-│                                Facturación, Compras (con N° de factura, adjunto y vínculo a un
-│                                renglón del presupuesto), Documentos
+├── proyecto-nuevo.html       → crear un proyecto (solo administradores): datos, parámetros (AIU, IVA,
+│                                anticipo, impuestos, pólizas) y opción de importar la plantilla de Excel v7
+├── proyecto-detalle.html     → detalle de un proyecto, por pestañas (cada una en assets/js/proy/):
+│                                Resumen · Inicio · Presupuesto (tabla madre, filtro por categoría,
+│                                ítems adicionales) · Avance diario (cantidades por ítem, bitácora, avance
+│                                físico real) · Documentos. Próximas fases: Cortes cliente, Mano de obra,
+│                                Gastos, Materiales y Cronograma.
 ├── facturacion.html          → vista global de facturas (filtro por mes, exportar Excel/PDF)
 ├── compras.html               → vista global de compras/costos (filtro por mes, exportar Excel/PDF)
 ├── suministros.html           → ventas de equipos/insumos sin instalación
 ├── clientes.html / contratistas.html / proveedores.html / empresas.html → catálogos
 ├── usuarios.html              → administración de roles (solo admins)
 ├── assets/js/config.js        → ⚠️ AQUÍ pones tu URL y llave de Supabase
+├── assets/js/proy/*.js        → módulos de Proyectos (core, inicio, presupuesto, avance, documentos, importar)
 ├── assets/js/pdf.js           → generador de PDF (Acta de Corte, listados)
 ├── assets/js/*.js             → lógica de cada página
 ├── assets/css/styles.css      → estilos pequeños
@@ -62,27 +59,23 @@ de Supabase. Todo lo demás ya está listo.
 
 ## Alcance de esta versión
 
-Incluye: creación de Proyectos (solo administradores) en un asistente de 2
-pasos que registra Cotización (renglonado de venta que define el valor del
-contrato), Presupuesto de Materiales/Equipos/Alquileres, Presupuesto de Mano
-de Obra y Documentos base — todo manual o importando la plantilla Excel de
-cada lista. Proyectos (empresa propia, N° de contrato, ejecutor personal
-propio/contratista, contrato IVA o AIU con IVA sobre la Utilidad, margen bruto
-y % de presupuesto gastado por categoría o en General), un Cronograma de
-Ejecución con tres vistas (Vista de lista tipo curva S, Kanban y Gantt con
-relleno de % avance) que calcula el % de avance del proyecto ponderando cada
-tarea por su peso financiero (renglón de Cotización o de Presupuesto
-vinculado) y su propio % de avance — no solo "hecha o no hecha" — igual que
-una curva S de obra, Cortes separados en dos subpestañas (Cliente: avances,
-factura y Acta en PDF con desglose de AIU en valores, datos de la empresa y
-adjuntos de facturas/soportes del cliente; Mano de Obra: contratistas, avances
-por corte, generación de pagos y su propia Acta), Documentos por proyecto,
-Facturación, Compras y Costos (con N° de factura, adjunto de la factura y
-vínculo opcional a un renglón del presupuesto para ver el gasto real ítem por
-ítem), Suministros, Empresas propias (con logo, NIT y dirección), y los
-catálogos de Clientes, Contratistas y Proveedores con contactos múltiples. El
-Panel Principal es personalizable e incluye un Modo Comité de Gerencia para la
-reunión semanal de proyectos.
+**Proyectos se está rediseñando a partir de la plantilla de Excel `PCT_Plantilla_Proyecto_v7`.**
+Ya están listas la Fase 1 (Inicio, Presupuesto, Avance diario, Documentos); faltan por construir
+Cortes cliente, Mano de obra, Gastos, Materiales, Cronograma y Tablero.
+
+Reglas de negocio clave:
+
+- **El valor del contrato no se digita**: sale de la suma de los ítems del Presupuesto (costo directo de
+  venta) más AIU e IVA sobre la utilidad.
+- **El avance físico real sale del Avance diario**, no de los cortes ni del dinero cobrado: valor
+  ejecutado (cantidad × precio de venta, con tope en lo contratado) dividido por el costo directo del contrato.
+- **Ítems adicionales**: trabajo que sale en obra fuera del contrato. Se avanzan y se cortan (cliente y
+  contratista) como cualquier ítem, pero no cambian el valor base del contrato ni el denominador del avance.
+- El avance diario indica quién ejecutó (contratista o personal propio): el corte del contratista toma solo
+  lo que ejecutó él y aún no se le ha cortado, esté pagado o no.
+
+Se conservan, sin cambios, el Panel Principal, Facturación y Compras globales (que pasarán a leer de
+Gastos en la Fase 3), Suministros, Empresas, Clientes, Contratistas y Proveedores.
 
 **Servicios y Mantenimientos** (contratos periódicos, informes
 preventivo→oferta→correctivo y el sistema de tickets) queda para una
