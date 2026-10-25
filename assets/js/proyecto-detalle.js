@@ -173,6 +173,19 @@
       if (tab.id === "gastos") return await PCT.renderGastos(root);
       if (tab.id === "documentos") return await PCT.renderDocumentos(root);
     } catch (err) {
+      // Si falta la función de una pestaña es porque el navegador guardó una
+      // versión vieja de la página (caché) tras publicar una versión nueva.
+      if (err instanceof TypeError && /PCT\.render\w+ is not a function/.test(err.message)) {
+        root.innerHTML = `
+          <div class="mx-auto max-w-md rounded-xl border border-amber-200 bg-amber-50 p-6 text-center">
+            <span class="material-symbols-outlined text-[36px] text-amber-500">refresh</span>
+            <h3 class="mt-1 text-base font-bold text-gray-900">Hay una versión nueva de la app</h3>
+            <p class="mt-1 text-sm text-gray-600">Tu navegador está mostrando una copia vieja de esta página. Recárgala para ver la pestaña «${escapeHtml(tab.label)}».</p>
+            <button type="button" onclick="location.reload()" class="mt-3 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">Recargar la página</button>
+            <p class="mt-2 text-xs text-gray-400">Si sigue igual: Cmd + Shift + R (en Windows, Ctrl + F5).</p>
+          </div>`;
+        return;
+      }
       manejarError(err, "No se pudo abrir la pestaña");
     }
   };
