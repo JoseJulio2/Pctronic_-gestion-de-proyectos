@@ -109,6 +109,11 @@ siempre qué debe hacer él después (subir a GitHub, correr SQL en Supabase, et
   `documento` = N° factura, `descripcion` = concepto, `valor_unitario` = valor, `cantidad` = null,
   `presupuesto_item_id` = null. El detalle de compras por ítem vendrá del **módulo de Compras**, que se
   conectará con el proyecto más adelante. Exportar/importar Excel (entiende también la hoja GASTOS de la v7).
+- **Compras (pendiente, decisión de Jose oct. 2026)**: será un **módulo aparte en la barra lateral**, manejado por
+  otra persona (no el usuario que maneja el proyecto). Idea acordada: la tabla de ítems del presupuesto con
+  columnas Compra 1, Compra 2… (fecha, proveedor, factura y por ítem cantidad + precio real); se refleja en el
+  Presupuesto de costos (comprado, costo real, margen real, falta por comprar) y cada compra entra sola a Gastos.
+  Falta decidir si el precio se digita sin o con IVA. **Materiales** (Fase 4) depende de este módulo.
 - Retención de contratistas: persona natural declarante 4 %, no declarante 6 %, empresa 0 %.
 - Crear proyectos: solo admin (validado en pantalla y con RLS `solo_admin_insert_proyectos`).
 
