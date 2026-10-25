@@ -26,7 +26,7 @@ siempre qué debe hacer él después (subir a GitHub, correr SQL en Supabase, et
   + plantilla de cotización descargable) · `inicio.js` (datos y parámetros) · `presupuesto.js` (pestañas
   **Cotización** y **Presupuesto de costos**) · `avance.js` (avance diario) · `cortes.js` (Cortes cliente +
   `PCT.editorCorte` y `PCT.pdfActa`, compartidos) · `manoobra.js` (contrato y cortes del contratista, pagos,
-  técnicos propios) · `gastos.js` (Gastos) · `documentos.js`.
+  técnicos propios) · `gastos.js` (Gastos) · `cronograma.js` (Cronograma + Gantt) · `documentos.js`.
   Cada pestaña se redibuja al abrirse.
 - **Nombres**: en pantalla se dice **Cotización** (precios al cliente) y **Presupuesto de costos** (costos
   internos). Nunca "Presupuesto" a secas para lo que paga el cliente. En la BD sigue siendo una sola tabla
@@ -114,6 +114,14 @@ siempre qué debe hacer él después (subir a GitHub, correr SQL en Supabase, et
   columnas Compra 1, Compra 2… (fecha, proveedor, factura y por ítem cantidad + precio real); se refleja en el
   Presupuesto de costos (comprado, costo real, margen real, falta por comprar) y cada compra entra sola a Gastos.
   Falta decidir si el precio se digita sin o con IVA. **Materiales** (Fase 4) depende de este módulo.
+- **Cronograma** (hoja CRONOGRAMA de la v7, tabla `cronograma_actividades`): filas tipo `fase` agrupan las
+  actividades siguientes (hito, gestión, compra, instalación, pruebas). Inicio = real › fijo › fin de la
+  predecesora + 1 (hito +0) › `fecha_inicio` del proyecto › hoy; fin = real › (hito: inicio) › inicio + días − 1
+  (días de calendario). Avance = % manual › 100 % con fin real › Instalación con frente (capítulo) =
+  `PCT.avanceDeCapitulo` (Avance diario) › 0; Compra queda manual hasta el módulo de Compras. Estados como el
+  Excel (Cumplido/Vencido/Pendiente; Terminada/Atrasada/En curso/Debe iniciar/Por iniciar) y días de atraso.
+  Fase = min/max de fechas y avance ponderado por duración. KPIs: holgura = fin contractual − fin proyectado.
+  Gantt por semanas (lunes a domingo). "Cargar cronograma base" = fases de la plantilla + una fase por capítulo.
 - Retención de contratistas: persona natural declarante 4 %, no declarante 6 %, empresa 0 %.
 - Crear proyectos: solo admin (validado en pantalla y con RLS `solo_admin_insert_proyectos`).
 
@@ -148,15 +156,16 @@ propios). Migración: `sql/migracion_2026-10_fase2.sql`. `assets/js/pdf.js` es h
 `imagenABase64` para el logo).
 
 Hecho (Fase 3, oct. 2026): **Gastos** (sin migración: la tabla `gastos` ya existía).
+Hecho (Fase 4, parte 1): **Cronograma** con Gantt (sin migración).
 
 Pendiente, en este orden:
 
-3. **Fase 4 — Materiales** (faltante, precio promedio, alertas), **Cronograma** (fases, hitos, predecesoras,
-   Gantt, % desde avance diario) y **Tablero** (margen, avance real vs cobrado vs planeado, alertas).
+3. **Fase 4 — Tablero** (margen, avance real vs cobrado vs planeado, alertas) y **Materiales** (faltante,
+   precio promedio, alertas; depende del módulo de Compras).
 4. **Fase 5** — migrar el Panel Principal, `compras.html` y `facturacion.html` a las tablas nuevas
    (hoy leen tablas heredadas: `compras`, `facturas`, `proyecto_contratistas`/`cortes_pago`).
 
-Pendientes sueltos: las pestañas Materiales/Cronograma aparecen como "Próximamente".
+Pendientes sueltos: la pestaña Materiales aparece como "Próximamente".
 
 ## Cómo trabajar con Jose
 
