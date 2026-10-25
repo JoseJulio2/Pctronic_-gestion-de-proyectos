@@ -26,7 +26,7 @@ siempre qué debe hacer él después (subir a GitHub, correr SQL en Supabase, et
   + plantilla de cotización descargable) · `inicio.js` (datos y parámetros) · `presupuesto.js` (pestañas
   **Cotización** y **Presupuesto de costos**) · `avance.js` (avance diario) · `cortes.js` (Cortes cliente +
   `PCT.editorCorte` y `PCT.pdfActa`, compartidos) · `manoobra.js` (contrato y cortes del contratista, pagos,
-  técnicos propios) · `documentos.js`.
+  técnicos propios) · `gastos.js` (Gastos) · `documentos.js`.
   Cada pestaña se redibuja al abrirse.
 - **Nombres**: en pantalla se dice **Cotización** (precios al cliente) y **Presupuesto de costos** (costos
   internos). Nunca "Presupuesto" a secas para lo que paga el cliente. En la BD sigue siendo una sola tabla
@@ -101,6 +101,12 @@ siempre qué debe hacer él después (subir a GitHub, correr SQL en Supabase, et
   < 0). El peso de cada ítem (valor/CD) es interno: **no mostrar valores en esa tabla**. Se conservan la curva
   de avance real, el avance por capítulo y los días registrados.
 - Gastos: ÚNICA fuente de todo el dinero que sale. Una fila por ítem comprado o pago; no se corrigen compras viejas.
+  Pestaña **Gastos** = hoja GASTOS de la v7: N°, fecha, tipo (Material, Equipo, Suministro, Alquiler, Transporte;
+  "Mano de obra contratista" solo la crea Mano de obra y aquí es de solo lectura), proveedor (si coincide con
+  `proveedores` se liga `proveedor_id`, si no `proveedor_texto`), factura/OC, ítem opcional, descripción,
+  cantidad (vacía = 1), valor unitario, valor total (columna calculada en la BD), observaciones y factura
+  adjunta (bucket `documentos`, ruta `<proyecto>/gastos/`). Edición en la tabla, filtros, exportar/importar Excel
+  con esas columnas (la importación omite filas de mano de obra contratista).
 - Retención de contratistas: persona natural declarante 4 %, no declarante 6 %, empresa 0 %.
 - Crear proyectos: solo admin (validado en pantalla y con RLS `solo_admin_insert_proyectos`).
 
@@ -134,15 +140,16 @@ y **Mano de obra** (contrato del contratista, cortes con retención y PDF, pagos
 propios). Migración: `sql/migracion_2026-10_fase2.sql`. `assets/js/pdf.js` es heredado (solo se usa su
 `imagenABase64` para el logo).
 
+Hecho (Fase 3, oct. 2026): **Gastos** (sin migración: la tabla `gastos` ya existía).
+
 Pendiente, en este orden:
 
-2. **Fase 3 — Gastos** (tabla `gastos`, factura adjunta; los pagos al contratista ya entran ahí desde Mano de obra).
 3. **Fase 4 — Materiales** (faltante, precio promedio, alertas), **Cronograma** (fases, hitos, predecesoras,
    Gantt, % desde avance diario) y **Tablero** (margen, avance real vs cobrado vs planeado, alertas).
 4. **Fase 5** — migrar el Panel Principal, `compras.html` y `facturacion.html` a las tablas nuevas
    (hoy leen tablas heredadas: `compras`, `facturas`, `proyecto_contratistas`/`cortes_pago`).
 
-Pendientes sueltos: las pestañas Gastos/Materiales/Cronograma aparecen como "Próximamente".
+Pendientes sueltos: las pestañas Materiales/Cronograma aparecen como "Próximamente".
 
 ## Cómo trabajar con Jose
 
