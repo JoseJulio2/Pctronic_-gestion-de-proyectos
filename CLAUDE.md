@@ -101,12 +101,14 @@ siempre qué debe hacer él después (subir a GitHub, correr SQL en Supabase, et
   < 0). El peso de cada ítem (valor/CD) es interno: **no mostrar valores en esa tabla**. Se conservan la curva
   de avance real, el avance por capítulo y los días registrados.
 - Gastos: ÚNICA fuente de todo el dinero que sale. Una fila por ítem comprado o pago; no se corrigen compras viejas.
-  Pestaña **Gastos** = hoja GASTOS de la v7: N°, fecha, tipo (Material, Equipo, Suministro, Alquiler, Transporte;
-  "Mano de obra contratista" solo la crea Mano de obra y aquí es de solo lectura), proveedor (si coincide con
-  `proveedores` se liga `proveedor_id`, si no `proveedor_texto`), factura/OC, ítem opcional, descripción,
-  cantidad (vacía = 1), valor unitario, valor total (columna calculada en la BD), observaciones y factura
-  adjunta (bucket `documentos`, ruta `<proyecto>/gastos/`). Edición en la tabla, filtros, exportar/importar Excel
-  con esas columnas (la importación omite filas de mano de obra contratista).
+  Pestaña **Gastos** = registro GENERAL por gasto o factura (Jose, oct. 2026; NO ítem por ítem): fecha, tipo
+  (Material, Equipo, Suministro, Alquiler, Transporte; "Mano de obra contratista" solo la crea Mano de obra y aquí
+  es de solo lectura), proveedor (si coincide con `proveedores` se liga `proveedor_id`, si no `proveedor_texto`),
+  N° de factura (opcional: también se pagan cosas sin factura), concepto, valor total, observaciones y soporte
+  opcional (bucket `documentos`, ruta `<proyecto>/gastos/`). Se agrega/edita con un formulario. En la BD:
+  `documento` = N° factura, `descripcion` = concepto, `valor_unitario` = valor, `cantidad` = null,
+  `presupuesto_item_id` = null. El detalle de compras por ítem vendrá del **módulo de Compras**, que se
+  conectará con el proyecto más adelante. Exportar/importar Excel (entiende también la hoja GASTOS de la v7).
 - Retención de contratistas: persona natural declarante 4 %, no declarante 6 %, empresa 0 %.
 - Crear proyectos: solo admin (validado en pantalla y con RLS `solo_admin_insert_proyectos`).
 
