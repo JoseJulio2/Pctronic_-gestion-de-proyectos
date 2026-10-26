@@ -335,6 +335,20 @@ window.PCT = window.PCT || {};
     return { el: fondo, cerrar };
   };
   PCT.BTN_PRIMARIO = "rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700";
+
+  // --------------------------------------------------------------------
+  // Panel de indicadores: un solo recuadro con divisiones finas. Las celdas
+  // se reparten el ancho (flex) y, si no caben, pasan a otra fila ocupando
+  // todo el ancho, sin dejar huecos. Se usa en todas las pestañas.
+  // --------------------------------------------------------------------
+  PCT.CLASE_PANEL_KPIS = "flex flex-wrap gap-px overflow-hidden rounded-xl border border-gray-200 bg-gray-200";
+  PCT.CLASE_CELDA_KPI = "min-w-[160px] flex-1 bg-white px-4 py-3";
+  PCT.tarjetaKpi = (titulo, valor, sub = "", claseValor = "text-gray-900") => `
+    <div class="${PCT.CLASE_CELDA_KPI}">
+      <p class="text-[11px] font-semibold uppercase tracking-wide text-gray-500">${titulo}</p>
+      <p class="mt-1 text-lg font-bold tabular-nums ${claseValor}">${valor}</p>
+      ${sub ? `<p class="mt-0.5 text-[11px] leading-snug text-gray-400">${sub}</p>` : ""}
+    </div>`;
   PCT.BTN_PELIGRO = "rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700";
 
   // Confirmación con el modal (devuelve una promesa de true/false)

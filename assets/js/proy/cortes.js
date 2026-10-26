@@ -17,14 +17,6 @@
     pagado: { label: "Pagado", clase: "bg-green-100 text-green-800" },
   };
 
-  // Tarjeta de indicador (misma apariencia en Cortes y Mano de obra)
-  PCT.tarjetaKpi = (titulo, valor, sub = "", claseValor = "text-gray-900") => `
-    <div class="rounded-xl border border-gray-200 bg-white p-4">
-      <p class="text-[11px] font-semibold uppercase text-gray-500">${titulo}</p>
-      <p class="mt-1 text-xl font-bold tabular-nums ${claseValor}">${valor}</p>
-      ${sub ? `<p class="mt-1 text-[11px] text-gray-400">${sub}</p>` : ""}
-    </div>`;
-
   // Filas del acta de cliente para un costo directo dado
   PCT.filasActa = (cd, p = PCT.estado.proyecto) => {
     const a = PCT.acta(cd, p);
@@ -338,7 +330,7 @@
 
     root.innerHTML = `
       <div class="space-y-5">
-        <div id="cc-kpis" class="grid grid-cols-2 gap-3 lg:grid-cols-5"></div>
+        <div id="cc-kpis" class="${PCT.CLASE_PANEL_KPIS}"></div>
         <div class="rounded-xl border border-gray-200 bg-white p-5">
           <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div>

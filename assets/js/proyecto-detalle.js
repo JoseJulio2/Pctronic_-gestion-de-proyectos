@@ -88,12 +88,12 @@
     const c = PCT.contrato();
     const { base } = PCT.resumenPresupuesto();
     const av = PCT.avanceFisico();
-    const kpi = (t, v, s = "") => `<div class="rounded-xl border border-gray-200 bg-white p-4"><p class="text-[11px] font-semibold uppercase text-gray-500">${t}</p><p class="mt-1 text-xl font-bold tabular-nums text-gray-900">${v}</p>${s ? `<p class="mt-1 text-xs text-gray-400">${s}</p>` : ""}</div>`;
+    const kpi = (t, v, s = "") => PCT.tarjetaKpi(t, v, s);
     const fila = (k, v) => `<div class="flex justify-between gap-4 py-1.5"><dt class="text-gray-500">${k}</dt><dd class="text-right font-medium text-gray-900">${v || "—"}</dd></div>`;
     const margenPpto = c.ingreso - base.costo;
     root.innerHTML = `
       <div class="space-y-4">
-        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <div class="${PCT.CLASE_PANEL_KPIS}">
           ${kpi("Valor del contrato", formatoMoneda(c.total), `Ingreso sin IVA ${formatoMoneda(c.ingreso)}`)}
           ${kpi("Avance físico real", PCT.fmtPct(av.pct), "Desde el avance diario")}
           ${kpi("Costo presupuestado", formatoMoneda(base.costo), `Materiales y equipos · ${base.n} ítems`)}

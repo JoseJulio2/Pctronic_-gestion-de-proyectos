@@ -98,7 +98,7 @@
 
     root.innerHTML = `
       <div class="space-y-4">
-        <div id="pres-kpis" class="grid grid-cols-2 gap-3 lg:grid-cols-5"></div>
+        <div id="pres-kpis" class="${PCT.CLASE_PANEL_KPIS}"></div>
 
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div id="pres-vistas" class="flex flex-wrap gap-1.5"></div>
@@ -123,12 +123,7 @@
     // ------------------------------------------------------------------
     // KPIs
     // ------------------------------------------------------------------
-    const tarjeta = (titulo, valor, sub = "") => `
-      <div class="rounded-xl border border-gray-200 bg-white p-3">
-        <p class="text-[11px] font-semibold uppercase text-gray-500">${titulo}</p>
-        <p class="mt-1 text-lg font-bold tabular-nums text-gray-900">${valor}</p>
-        ${sub ? `<p class="text-xs text-gray-400">${sub}</p>` : ""}
-      </div>`;
+    const tarjeta = (titulo, valor, sub = "") => PCT.tarjetaKpi(titulo, valor, sub);
 
     const pintarKpis = () => {
       const { base, adic } = PCT.resumenPresupuesto();

@@ -146,7 +146,7 @@
     // ------------------------------------------------------------------
     root.innerHTML = `
       <div class="space-y-5">
-        <div id="cr-kpis" class="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7"></div>
+        <div id="cr-kpis" class="${PCT.CLASE_PANEL_KPIS}"></div>
         <div class="rounded-xl border border-gray-200 bg-white p-5">
           <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -154,6 +154,7 @@
               <p class="text-xs text-gray-500">Escribe días y predecesora: las fechas se calculan solas. El avance de las actividades de <b>Instalación</b> sale del Avance diario del capítulo vinculado; en las demás pon el % a mano o el fin real.</p>
             </div>
             <div class="flex flex-wrap items-center gap-2">
+              <button type="button" id="cr-pdf" class="flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"><span class="material-symbols-outlined text-[16px]">picture_as_pdf</span> PDF para el cliente</button>
               <button type="button" data-nuevo="fase" class="rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-blue-100">+ Fase</button>
               <button type="button" data-nuevo="actividad" class="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700">+ Actividad</button>
             </div>
@@ -514,6 +515,225 @@
         creandoBase = false;
       }
     };
+
+    // ------------------------------------------------------------------
+    // PDF para el cliente: resumen, tabla de actividades y Gantt
+    // ------------------------------------------------------------------
+    const hexARgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+    const aclarar = (rgb, f) => rgb.map((c) => Math.round(c + (255 - c) * f));
+
+    const descargarPdf = async () => {
+      if (!acts.length) return mostrarAviso("El cronograma está vacío.", "error");
+      if (!window.jspdf?.jsPDF) return mostrarAviso("No se pudo cargar el generador de PDF (revisa tu conexión).", "error");
+      calcular();
+      const pr = p();
+      const emp = pr.empresas || {};
+      const doc = new window.jspdf.jsPDF({ unit: "pt", format: "letter", orientation: "landscape" });
+      const W = doc.internal.pageSize.getWidth();
+      const H = doc.internal.pageSize.getHeight();
+      const M = 30;
+      const hoy = PCT.hoyISO();
+      const logo = emp.logo_url && typeof imagenABase64 === "function" ? await imagenABase64(emp.logo_url) : null;
+
+      const actividades = acts.filter((a) => a.tipo !== "fase").map((a) => calc.get(a.id));
+      const inicio = actividades.map((c) => c.inicio).sort()[0];
+      const fin = actividades.map((c) => c.fin).sort().at(-1);
+      const finContr = pr.fecha_fin_estimada || null;
+
+      // encabezado de cada página
+      const encabezado = (titulo) => {
+        if (logo) {
+          try {
+            doc.addImage(logo, M, 18, 70, 30, undefined, "FAST");
+          } catch (e) {
+            /* formato de logo no soportado */
+          }
+        }
+        doc.setFont(undefined, "bold");
+        doc.setFontSize(13);
+        doc.text(titulo, logo ? M + 80 : M, 32);
+        doc.setFont(undefined, "normal");
+        doc.setFontSize(8.5);
+        doc.text(`${pr.nombre || ""}${pr.clientes?.nombre ? " · " + pr.clientes.nombre : ""}${pr.numero_contrato ? " · Contrato " + pr.numero_contrato : ""}`, logo ? M + 80 : M, 44);
+        doc.setFont(undefined, "bold");
+        doc.text(emp.nombre || window.PCTRONIC_CONFIG?.NOMBRE_EMPRESA || "Pctronic Seguridad Electrónica", W - M, 30, { align: "right" });
+        doc.setFont(undefined, "normal");
+        doc.text(`Fecha de corte: ${formatoFecha(hoy)}`, W - M, 42, { align: "right" });
+        doc.setDrawColor(220);
+        doc.line(M, 54, W - M, 54);
+      };
+      const pie = () => {
+        const n = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= n; i++) {
+          doc.setPage(i);
+          doc.setFontSize(7.5);
+          doc.setTextColor(150);
+          doc.text(`Página ${i} de ${n}`, W - M, H - 14, { align: "right" });
+          doc.setTextColor(0);
+        }
+      };
+
+      // ---- página 1: resumen + tabla ----
+      encabezado("CRONOGRAMA DE OBRA");
+      const resumen = [
+        ["Inicio", inicio ? formatoFecha(inicio) : "—"],
+        ["Fin proyectado", fin ? formatoFecha(fin) : "—"],
+        ["Fin contractual", finContr ? formatoFecha(finContr) : "Sin definir"],
+        ["Avance físico", PCT.fmtPct(PCT.avanceFisico().pct)],
+        ["Hitos cumplidos", `${acts.filter((a) => a.tipo === "hito" && calc.get(a.id).estado === "Cumplido").length} / ${acts.filter((a) => a.tipo === "hito").length}`],
+      ];
+      const anchoCaja = (W - 2 * M - 4 * 8) / 5;
+      resumen.forEach(([t, v], i) => {
+        const x = M + i * (anchoCaja + 8);
+        doc.setFillColor(245, 247, 250);
+        doc.roundedRect(x, 64, anchoCaja, 38, 4, 4, "F");
+        doc.setFontSize(7.5);
+        doc.setTextColor(110);
+        doc.text(t.toUpperCase(), x + 8, 77);
+        doc.setFontSize(12);
+        doc.setTextColor(20);
+        doc.setFont(undefined, "bold");
+        doc.text(v, x + 8, 94);
+        doc.setFont(undefined, "normal");
+      });
+      doc.setTextColor(0);
+
+      const filasTabla = acts.map((a) => {
+        const c = calc.get(a.id);
+        return {
+          a,
+          c,
+          celdas: [
+            c.numero,
+            a.nombre,
+            a.tipo === "fase" ? "" : TIPOS[a.tipo],
+            a.tipo === "fase" ? "" : a.responsable || "",
+            c.inicio ? formatoFecha(c.inicio) : "",
+            c.fin ? formatoFecha(c.fin) : "",
+            c.dias === null || c.dias === undefined ? "" : String(c.dias),
+            c.pct === null || c.pct === undefined ? "" : PCT.fmtPct(c.pct, 0),
+            c.estado || "",
+          ],
+        };
+      });
+      doc.autoTable({
+        startY: 112,
+        margin: { left: M, right: M, top: 64 },
+        head: [["ID", "Fase / actividad", "Tipo", "Responsable", "Inicio", "Fin", "Días", "Avance", "Estado"]],
+        body: filasTabla.map((f) => f.celdas),
+        styles: { fontSize: 7.5, cellPadding: 3, valign: "middle" },
+        headStyles: { fillColor: [19, 91, 236], textColor: 255, fontStyle: "bold" },
+        columnStyles: { 0: { cellWidth: 30 }, 2: { cellWidth: 62 }, 3: { cellWidth: 90 }, 4: { cellWidth: 62 }, 5: { cellWidth: 62 }, 6: { cellWidth: 34, halign: "right" }, 7: { cellWidth: 44, halign: "right" }, 8: { cellWidth: 68 } },
+        didParseCell: (d) => {
+          if (d.section !== "body") return;
+          const f = filasTabla[d.row.index];
+          if (f.a.tipo === "fase") {
+            d.cell.styles.fontStyle = "bold";
+            d.cell.styles.fillColor = aclarar(hexARgb(f.c.color), 0.85);
+            d.cell.styles.textColor = hexARgb(f.c.color);
+          }
+          if (d.column.index === 8 && ["Atrasada", "Vencido", "Con atraso"].includes(f.c.estado)) d.cell.styles.textColor = [220, 38, 38];
+          if (d.column.index === 8 && ["Terminada", "Cumplido"].includes(f.c.estado)) d.cell.styles.textColor = [5, 150, 105];
+        },
+        didDrawPage: (d) => {
+          if (d.pageNumber > 1) encabezado("CRONOGRAMA DE OBRA");
+        },
+      });
+
+      // ---- Gantt ----
+      const conFechas = acts.filter((a) => calc.get(a.id).inicio);
+      let desde = conFechas.map((a) => calc.get(a.id).inicio).sort()[0];
+      let hasta = conFechas.map((a) => calc.get(a.id).fin).sort().at(-1);
+      if (hoy < desde) desde = hoy;
+      if (hoy > hasta) hasta = hoy;
+      desde = sumarDias(desde, -((aFecha(desde).getDay() + 6) % 7)); // lunes
+      const semanas = Math.max(1, Math.ceil((diasEntre(desde, hasta) + 1) / 7));
+      const totalDias = semanas * 7;
+      const IZQ = M + 190; // ancho de la columna de nombres
+      const ANCHO = W - M - IZQ;
+      const xDe = (iso) => IZQ + (diasEntre(desde, iso) / totalDias) * ANCHO;
+      const ALTO_FILA = 15;
+      const TOPE = 92;
+      const filasPorPagina = Math.floor((H - TOPE - 40) / ALTO_FILA);
+
+      const encabezadoGantt = (nFilas) => {
+        doc.addPage();
+        encabezado("DIAGRAMA DE GANTT");
+        doc.setFontSize(7);
+        doc.setTextColor(100);
+        const paso = semanas > 26 ? 2 : 1; // si hay muchas semanas, etiqueta una sí y otra no
+        for (let k = 0; k < semanas; k++) {
+          const lunes = sumarDias(desde, k * 7);
+          const x = IZQ + (k * 7 / totalDias) * ANCHO;
+          doc.setDrawColor(235);
+          doc.line(x, TOPE - 10, x, TOPE + nFilas * ALTO_FILA);
+          if (k % paso === 0) {
+            const d = aFecha(lunes);
+            const mes = d.toLocaleDateString("es-CO", { month: "short" }).replace(".", "");
+            doc.text(k === 0 || d.getDate() <= 7 * paso ? `${d.getDate()} ${mes}` : String(d.getDate()), x + 2, TOPE - 14);
+          }
+        }
+        doc.setTextColor(0);
+      };
+
+      for (let i = 0; i < acts.length; i += filasPorPagina) {
+        const pagina = acts.slice(i, i + filasPorPagina);
+        encabezadoGantt(pagina.length);
+        pagina.forEach((a, k) => {
+          const c = calc.get(a.id);
+          const y = TOPE + k * ALTO_FILA;
+          const rgb = hexARgb(c.color);
+          if (a.tipo === "fase") {
+            doc.setFillColor(...aclarar(rgb, 0.9));
+            doc.rect(M, y, W - 2 * M, ALTO_FILA, "F");
+          }
+          doc.setFontSize(7.5);
+          doc.setFont(undefined, a.tipo === "fase" ? "bold" : "normal");
+          doc.setTextColor(...(a.tipo === "fase" ? rgb : [40, 40, 40]));
+          const nombre = `${c.numero} · ${a.nombre}`;
+          doc.text(doc.splitTextToSize(nombre, 180)[0], a.tipo === "fase" ? M + 2 : M + 8, y + 10);
+          doc.setTextColor(0);
+          doc.setFont(undefined, "normal");
+          if (!c.inicio) return;
+          const x0 = xDe(c.inicio);
+          if (a.tipo === "hito") {
+            const cx = x0 + ANCHO / totalDias / 2;
+            const cy = y + ALTO_FILA / 2;
+            const color = c.pct >= 1 ? [5, 150, 105] : c.estado === "Vencido" ? [220, 38, 38] : rgb;
+            doc.setFillColor(...color);
+            doc.lines([[4, 4], [-4, 4], [-4, -4], [4, -4]], cx, cy - 4, [1, 1], "F", true);
+            return;
+          }
+          const ancho = Math.max(((diasEntre(c.inicio, c.fin) + 1) / totalDias) * ANCHO, 2);
+          const alto = a.tipo === "fase" ? 5 : 8;
+          const yb = y + (ALTO_FILA - alto) / 2;
+          doc.setFillColor(...aclarar(rgb, 0.7));
+          doc.rect(x0, yb, ancho, alto, "F");
+          const atrasada = c.estado === "Atrasada" || c.estado === "Con atraso";
+          doc.setFillColor(...(atrasada ? [220, 38, 38] : rgb));
+          if (c.pct > 0) doc.rect(x0, yb, ancho * Math.min(1, c.pct), alto, "F");
+        });
+        // línea de hoy
+        const xh = xDe(hoy) + ANCHO / totalDias / 2;
+        doc.setDrawColor(220, 38, 38);
+        doc.setLineWidth(0.8);
+        doc.line(xh, TOPE - 6, xh, TOPE + pagina.length * ALTO_FILA);
+        doc.setLineWidth(0.2);
+        doc.setFontSize(6.5);
+        doc.setTextColor(220, 38, 38);
+        doc.text("Hoy", xh + 2, TOPE - 2);
+        doc.setTextColor(0);
+      }
+      // leyenda
+      doc.setFontSize(7);
+      doc.setTextColor(110);
+      doc.text("Barra clara = duración programada · barra oscura = avance · rojo = con atraso · rombo = hito (verde = cumplido)", M, H - 14);
+      doc.setTextColor(0);
+
+      pie();
+      doc.save(`Cronograma_${(pr.nombre || "proyecto").replace(/[^\w\-]+/g, "_")}.pdf`);
+    };
+    root.querySelector("#cr-pdf").addEventListener("click", () => descargarPdf().catch((err) => manejarError(err, "No se pudo generar el PDF")));
 
     root.querySelector("#cr-filas").innerHTML = `<tr><td colspan="17" class="py-6"><div class="skeleton h-10 rounded"></div></td></tr>`;
     try {

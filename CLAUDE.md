@@ -122,10 +122,15 @@ siempre qué debe hacer él después (subir a GitHub, correr SQL en Supabase, et
   Excel (Cumplido/Vencido/Pendiente; Terminada/Atrasada/En curso/Debe iniciar/Por iniciar) y días de atraso.
   Fase = min/max de fechas y avance ponderado por duración. KPIs: holgura = fin contractual − fin proyectado.
   Gantt por semanas (lunes a domingo). "Cargar cronograma base" = fases de la plantilla + una fase por capítulo.
+  Botón "PDF para el cliente": hoja horizontal con resumen, tabla de actividades (fases en color) y el Gantt
+  dibujado con jsPDF (barras, rombos de hito, línea de hoy; varias páginas si hay muchas filas).
 - Retención de contratistas: persona natural declarante 4 %, no declarante 6 %, empresa 0 %.
 - Crear proyectos: solo admin (validado en pantalla y con RLS `solo_admin_insert_proyectos`).
 
 ## Convenciones
+
+- **Indicadores**: siempre con `PCT.tarjetaKpi(...)` dentro de un contenedor con `PCT.CLASE_PANEL_KPIS` (un solo
+  recuadro con divisiones finas; las celdas se reparten el ancho y no dejan huecos). No hacer tarjetas sueltas.
 
 - Todo el texto de la interfaz en **español** (Colombia). Moneda COP con `formatoMoneda`.
 - Escapa siempre con `escapeHtml` lo que viene de la BD antes de meterlo en `innerHTML`.

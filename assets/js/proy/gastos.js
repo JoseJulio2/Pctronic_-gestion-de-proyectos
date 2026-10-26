@@ -74,7 +74,7 @@
 
     root.innerHTML = `
       <div class="space-y-5">
-        <div id="ga-kpis" class="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6"></div>
+        <div id="ga-kpis" class="${PCT.CLASE_PANEL_KPIS}"></div>
         <div class="rounded-xl border border-gray-200 bg-white p-5">
           <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
             <div>

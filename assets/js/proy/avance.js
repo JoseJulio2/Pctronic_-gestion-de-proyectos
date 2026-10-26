@@ -55,7 +55,7 @@
 
     root.innerHTML = `
       <div class="space-y-5">
-        <div id="av-kpis" class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5"></div>
+        <div id="av-kpis" class="${PCT.CLASE_PANEL_KPIS}"></div>
         <!-- Las tarjetas de la derecha toman la altura de la de la izquierda
              (y hacen scroll por dentro) para que no queden huecos -->
         <div class="grid grid-cols-1 gap-5 lg:grid-cols-3">
@@ -86,10 +86,10 @@
           else porCortarMO += pendMO * PCT.num(i.pu_contratista);
         }
       });
-      const t = (titulo, valor, sub = "", extra = "") => `
-        <div class="rounded-xl border border-gray-200 bg-white p-4 ${extra}">
-          <p class="text-[11px] font-semibold uppercase text-gray-500">${titulo}</p>
-          <p class="mt-1 text-xl font-bold tabular-nums text-gray-900">${valor}</p>
+      const t = (titulo, valor, sub = "") => `
+        <div class="${PCT.CLASE_CELDA_KPI}">
+          <p class="text-[11px] font-semibold uppercase tracking-wide text-gray-500">${titulo}</p>
+          <p class="mt-1 text-lg font-bold tabular-nums text-gray-900">${valor}</p>
           ${sub}
         </div>`;
       root.querySelector("#av-kpis").innerHTML =
@@ -97,8 +97,7 @@
           "Avance físico real",
           PCT.fmtPct(av.pct),
           `<div class="barra-progreso mt-2"><span style="width:${Math.round(av.pct * 100)}%"></span></div>
-           <p class="mt-1 text-[11px] text-gray-400">Valor ejecutado / costo directo del contrato</p>`,
-          "sm:col-span-2 lg:col-span-1"
+           <p class="mt-1 text-[11px] text-gray-400">Valor ejecutado / costo directo del contrato</p>`
         ) +
         t("Valor ejecutado", formatoMoneda(av.ejecBase), `<p class="mt-1 text-[11px] text-gray-400">de ${formatoMoneda(av.cd)} (costo directo)</p>`) +
         t("Adicionales ejecutados", formatoMoneda(av.ejecAdic), `<p class="mt-1 text-[11px] text-gray-400">Fuera del contrato base</p>`) +
