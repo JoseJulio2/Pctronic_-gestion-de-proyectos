@@ -447,7 +447,24 @@
     // ------------------------------------------------------------------
     // Cronograma base (como la plantilla v7, con un frente por capítulo)
     // ------------------------------------------------------------------
+    let creandoBase = false;
     const cargarBase = async () => {
+      // evita crearlo dos veces (doble clic o el botón pulsado mientras trabaja)
+      if (creandoBase) return;
+      creandoBase = true;
+      const boton = root.querySelector("#cr-base");
+      if (boton) {
+        boton.disabled = true;
+        boton.textContent = "Creando cronograma...";
+      }
+      const { count, error: errConteo } = await window.sb.from("cronograma_actividades").select("id", { count: "exact", head: true }).eq("proyecto_id", pid);
+      if (errConteo || count > 0) {
+        creandoBase = false;
+        await cargar();
+        pintar();
+        if (errConteo) return manejarError(errConteo, "No se pudo crear el cronograma base");
+        return mostrarAviso("Este proyecto ya tiene cronograma.", "info");
+      }
       const filas = [];
       let orden = 0;
       const add = (f) => {
@@ -493,6 +510,8 @@
         mostrarAviso(`Cronograma base creado con ${filas.length} filas. Ajusta días, responsables y fechas.`, "exito");
       } catch (err) {
         manejarError(err, "No se pudo crear el cronograma base");
+      } finally {
+        creandoBase = false;
       }
     };
 
